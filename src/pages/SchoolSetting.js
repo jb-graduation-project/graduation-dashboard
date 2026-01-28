@@ -8,6 +8,8 @@ import React, {
 } from "react";
 import Navbar from "../components/Navbar";
 
+const API_BASE = "http://127.0.0.1:8000";
+
 export default function SchoolSetting() {
   // ====== Viewport ======
   const VIEW_W = 900;
@@ -18,6 +20,15 @@ export default function SchoolSetting() {
   const viewportRef = useRef(null);
   const menuRef = useRef(null);
   const [autoAnalyzing, setAutoAnalyzing] = useState(false);
+
+  const [currentFloorIndex, setCurrentFloorIndex] = useState(0);
+
+  const analyzeRunIdRef = useRef(0);
+  const currentFloorIndexRef = useRef(0);
+
+  useEffect(() => {
+    currentFloorIndexRef.current = currentFloorIndex;
+  }, [currentFloorIndex]);
 
   // ====== Helpers ======
   const clamp = useCallback((v, a, b) => Math.max(a, Math.min(b, v)), []);
@@ -54,10 +65,12 @@ export default function SchoolSetting() {
       // (자동분석 캐시 같은 건 프론트 전용이라도 UI용으로 유지 가능)
       hasAutoAnalysisResult: false,
       autoElementsCache: [],
+
+      autoAnalysisHidden: false, // 결과 숨김 상태
+      abort: { analyze: null },
     };
   }, []);
 
-  const [currentFloorIndex, setCurrentFloorIndex] = useState(0);
   const [floorNames, setFloorNames] = useState(["1층"]);
   const [floors, setFloors] = useState([makeEmptyFloor()]);
 
@@ -122,31 +135,17 @@ export default function SchoolSetting() {
       return next;
     });
   }, [currentFloorIndex, makeEmptyFloor]);
-  const handleAutoAnalyze = useCallback(() => {
-    if (!imageSrc) {
-      alert("먼저 이미지를 업로드해 주세요.");
-      return;
-    }
-
-    // ✅ 지금은 서버 없으니까 UI만 시뮬레이션
-    setAutoAnalyzing(true);
-
-    // TODO: 나중에 서버 연결하면 여기서 분석 요청하고, 결과로 elements set 하면 됨.
-    setTimeout(() => {
-      setAutoAnalyzing(false);
-      alert("✅ (데모) 자동 분석 버튼 동작!");
-    }, 800);
-  }, [imageSrc]);
 
   const performRedoOnce = useCallback(() => {
     setFloors((prev) => {
       const next = [...prev];
       const curr = next[currentFloorIndex] || makeEmptyFloor();
-      const redos = curr.redoStack || [];
-      if (!redos.length) return prev;
 
-      const last = redos[redos.length - 1];
-      const rest = redos.slice(0, -1);
+      const redo = curr.redoStack || [];
+      if (!redo.length) return prev;
+
+      const last = redo[redo.length - 1];
+      const rest = redo.slice(0, -1);
 
       next[currentFloorIndex] = {
         ...curr,
@@ -157,9 +156,107 @@ export default function SchoolSetting() {
           JSON.parse(JSON.stringify(curr.elements || [])),
         ],
       };
+
       return next;
     });
   }, [currentFloorIndex, makeEmptyFloor]);
+
+  const runAutoAnalyze = useCallback(
+    async (floorIdx, file) => {
+      if (!file) {
+        alert("업로드된 원본 파일이 없습니다.");
+        return;
+      }
+
+      const myRunId = ++analyzeRunIdRef.current;
+      setAutoAnalyzing(true);
+
+      setFloors((prev) => {
+        const next = [...prev];
+        const curr = next[floorIdx] || makeEmptyFloor();
+        next[floorIdx] = {
+          ...curr,
+          autoAnalysisHidden: false, // ⭐ 재실행 시 강제 표시
+        };
+        return next;
+      });
+
+      const controller = new AbortController();
+
+      setFloors((prev) => {
+        const next = [...prev];
+        const curr = next[floorIdx] || makeEmptyFloor();
+        curr?.abort?.analyze?.abort?.();
+        next[floorIdx] = {
+          ...curr,
+          abort: { analyze: controller },
+          autoAnalysisHidden: false,
+        };
+        return next;
+      });
+
+      try {
+        const form = new FormData();
+        form.append("image", file);
+        // ⛑ 안전장치 (이전 코드 섞여 있어도 안 터짐)
+        form.append("file", file);
+
+        const res = await fetch(`${API_BASE}/analyze-floorplan`, {
+          method: "POST",
+          body: form,
+          signal: controller.signal,
+        });
+
+        // ✅ 여기!!
+        if (!res.ok) {
+          const text = await res.text(); // FastAPI 에러 메시지 그대로 읽기
+          throw new Error(text);
+        }
+
+        const data = await res.json();
+        const serverElements = Array.isArray(data.elements)
+          ? data.elements
+          : [];
+        const fixedElements = serverElements.map((el) => ({
+          ...el,
+          floor: floorIdx, // ⭐ 현재 층으로 강제 지정
+        }));
+
+        if (myRunId !== analyzeRunIdRef.current) return;
+
+        pushUndoSnapshot();
+
+        setFloors((prev) => {
+          const next = [...prev];
+          const curr = next[floorIdx] || makeEmptyFloor();
+          next[floorIdx] = {
+            ...curr,
+            elements: fixedElements,
+            hasAutoAnalysisResult: true,
+            autoElementsCache: fixedElements,
+            autoAnalysisHidden: false,
+          };
+          return next;
+        });
+      } catch (e) {
+        console.error("자동 분석 에러:", e);
+        if (e.name !== "AbortError") {
+          alert("자동 분석 실패\n" + (e?.message || "알 수 없는 오류"));
+        }
+      } finally {
+        if (myRunId === analyzeRunIdRef.current) {
+          setAutoAnalyzing(false);
+          setFloors((prev) => {
+            const next = [...prev];
+            const curr = next[floorIdx] || makeEmptyFloor();
+            next[floorIdx] = { ...curr, abort: { analyze: null } };
+            return next;
+          });
+        }
+      }
+    },
+    [API_BASE, makeEmptyFloor, pushUndoSnapshot, setFloors]
+  );
 
   // ====== UI State ======
   const modeButtons = ["제한 구역", "방", "문", "비상구", "건물윤곽"];
@@ -788,6 +885,7 @@ export default function SchoolSetting() {
       setOutlinePoints([]);
       setContextMenu(null);
       setShowHelp(false);
+      runAutoAnalyze(floorIdx, file);
     },
     [currentFloorIndex, makeEmptyFloor]
   );
@@ -1773,9 +1871,11 @@ export default function SchoolSetting() {
       const opts = [];
 
       // 건물윤곽은 삭제만(간단)
-      if (hit.el.type !== "건물윤곽") {
+      // ✅ 윤곽 우클릭: "해당 윤곽 삭제" + "윤곽 전체 삭제" 둘 다 띄우기
+      if (hit.el.type === "건물윤곽") {
+        // 1) 이 윤곽만 삭제
         opts.push({
-          label: "삭제",
+          label: "이 윤곽 삭제",
           action: () => {
             pushUndoSnapshot();
             setElements((prev) => prev.filter((p) => p.id !== hit.el.id));
@@ -1785,15 +1885,38 @@ export default function SchoolSetting() {
             setEditingResizeId(null);
           },
         });
-      } else {
+
+        // 2) 현재 층의 윤곽 전부 삭제
         opts.push({
           label: "윤곽 전체 삭제",
+          action: () => {
+            pushUndoSnapshot();
+            setElements((prev) =>
+              prev.filter(
+                (p) =>
+                  !(
+                    (p.floor ?? 0) === currentFloorIndex &&
+                    p.type === "건물윤곽"
+                  )
+              )
+            );
+            setContextMenu(null);
+            setSelectedId(null);
+            setSelectedIds([]);
+            setEditingResizeId(null);
+          },
+        });
+      } else {
+        // ✅ 윤곽이 아닌 일반 요소: 기존처럼 "삭제"
+        opts.push({
+          label: "삭제",
           action: () => {
             pushUndoSnapshot();
             setElements((prev) => prev.filter((p) => p.id !== hit.el.id));
             setContextMenu(null);
             setSelectedId(null);
             setSelectedIds([]);
+            setEditingResizeId(null);
           },
         });
       }
@@ -2093,13 +2216,97 @@ export default function SchoolSetting() {
 
           {/* 모드 버튼 */}
           <div className="flex flex-wrap gap-2 items-center">
-            <button
-              onClick={handleAutoAnalyze}
-              className={btnSub}
-              disabled={!imageSrc || autoAnalyzing}
-            >
-              {autoAnalyzing ? "자동 분석 중..." : "구조도 자동 분석"}
-            </button>
+            {/* ✅ 자동 분석 컨트롤 */}
+            {autoAnalyzing ? (
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-semibold text-gray-700">
+                  구조도 자동 분석 중...
+                </div>
+                <button
+                  onClick={() => {
+                    analyzeRunIdRef.current += 1;
+
+                    setFloors((prev) => {
+                      const next = [...prev];
+                      const idx = currentFloorIndexRef.current;
+                      const curr = next[idx] || makeEmptyFloor();
+                      curr?.abort?.analyze?.abort?.();
+                      next[idx] = { ...curr, abort: { analyze: null } };
+                      return next;
+                    });
+                    setAutoAnalyzing(false);
+                  }}
+                  className={btnGray}
+                >
+                  자동 분석 멈추기
+                </button>
+              </div>
+            ) : currentFloor.hasAutoAnalysisResult &&
+              !currentFloor.autoAnalysisHidden ? (
+              <button
+                onClick={() => {
+                  setFloors((prev) => {
+                    const next = [...prev];
+                    const curr = next[currentFloorIndex];
+                    if (!curr) return prev;
+
+                    next[currentFloorIndex] = {
+                      ...curr,
+                      elements: [], // ⭐ 화면에서 숨김(제거)
+                      autoAnalysisHidden: true, // ⭐ 숨김 상태로 전환
+                    };
+                    return next;
+                  });
+
+                  // 선택/리사이즈 중이면 같이 초기화(안 해도 되지만 안전)
+                  setSelectedId(null);
+                  setSelectedIds([]);
+                  setEditingResizeId(null);
+                  setContextMenu(null);
+                }}
+                className={btnSub}
+              >
+                이미지 자동 분석 끄기
+              </button>
+            ) : currentFloor.hasAutoAnalysisResult &&
+              currentFloor.autoAnalysisHidden ? (
+              <button
+                onClick={() => {
+                  setFloors((prev) => {
+                    const next = [...prev];
+                    const curr = next[currentFloorIndex];
+                    if (!curr) return prev;
+
+                    next[currentFloorIndex] = {
+                      ...curr,
+                      elements: curr.autoElementsCache || [], // ⭐ 캐시에서 복구
+                      autoAnalysisHidden: false, // ⭐ 다시 보이게
+                    };
+                    return next;
+                  });
+                }}
+                className={btnSub}
+              >
+                자동 분석 다시 가져오기
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  const curr = floors[currentFloorIndex];
+                  if (!curr?.uploadedFile) {
+                    alert("업로드된 원본 이미지가 없습니다.");
+                    return;
+                  }
+
+                  // ⭐ FastAPI 재분석 실행
+                  runAutoAnalyze(currentFloorIndex, curr.uploadedFile);
+                }}
+                className={btnSub}
+                disabled={!imageSrc}
+              >
+                자동 분석하기
+              </button>
+            )}
             <div className="text-sm font-semibold text-gray-700 mr-2">
               도구:
             </div>

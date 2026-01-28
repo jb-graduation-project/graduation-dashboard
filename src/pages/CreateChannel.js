@@ -4,15 +4,18 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
 const API_BASE =
-  "https://disaster-ar-backend-a7bvfvd8f6bxbsfh.koreacentral-01.azurewebsites.net"; // ✅ 끝 / 제거
+  "https://disaster-ar-backend-a7bvfvd8f6bxbsfh.koreacentral-01.azurewebsites.net";
 
 function CreateChannel() {
   const [schoolName, setSchoolName] = useState("");
+  const [mapFile, setMapFile] = useState(null); // ✅ 추가
   const [loading, setLoading] = useState(false);
+
   const navigate = useNavigate();
 
   const handleCreate = async () => {
     const trimmed = schoolName.trim();
+
     if (!trimmed) {
       alert("학교 이름을 입력해 주세요.");
       return;
@@ -21,18 +24,20 @@ function CreateChannel() {
     try {
       setLoading(true);
 
-      // ✅ 백엔드 스펙: POST /api/channels
-      // mapFile UI는 없으니 전송하지 않음(선택 필드일 때)
       const formData = new FormData();
       formData.append("schoolName", trimmed);
+
+      // ✅ 파일 다시 추가
+      if (mapFile) {
+        formData.append("mapFile", mapFile);
+      }
 
       const res = await axios.post(`${API_BASE}/api/channels`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 10000,
-        validateStatus: () => true, // 4xx/5xx도 res로 받기
+        validateStatus: () => true,
       });
 
-      // 실패 처리
       if (!(res.status >= 200 && res.status < 300)) {
         const msg =
           res.data?.message ||
@@ -43,25 +48,15 @@ function CreateChannel() {
         return;
       }
 
-      // ✅ 성공 응답(예상): { id, schoolName, mapFile, accessCode }
       const data = res.data || {};
       const channelId = data.id;
       const accessCode = data.accessCode;
 
-      // 혹시 응답 키가 다를 수 있으니 최소한으로 안전하게 처리
       if (!channelId) {
-        alert(
-          `채널은 생성된 것 같은데 id가 응답에 없습니다.\n\n${JSON.stringify(
-            data,
-            null,
-            2
-          )}`
-        );
+        alert(`id가 응답에 없습니다.\n\n${JSON.stringify(data, null, 2)}`);
         return;
       }
 
-      // ✅ 화면에 mapFile은 보여줄 필요 없으니 state에 안 넣고,
-      // 필요한 값만 들고 이동
       navigate("/room-list", {
         state: {
           channelId,
@@ -77,7 +72,7 @@ function CreateChannel() {
         return;
       }
 
-      alert("서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+      alert("서버 오류가 발생했습니다.");
     } finally {
       setLoading(false);
     }
@@ -90,13 +85,47 @@ function CreateChannel() {
           채널 생성하기
         </h2>
 
+        {/* 학교 이름 */}
         <input
           type="text"
           placeholder="학교 이름"
           value={schoolName}
           onChange={(e) => setSchoolName(e.target.value)}
-          className="w-full mb-6 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300"
+          className="w-full mb-4 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300"
         />
+
+        {/* ✅ 숨긴 file input */}
+        <input
+          id="mapFile"
+          type="file"
+          accept="image/*"
+          onChange={(e) => setMapFile(e.target.files?.[0] ?? null)}
+          className="hidden"
+        />
+
+        {/* ✅ 꾸민 업로드 박스 */}
+        <label
+          htmlFor="mapFile"
+          className="w-full mb-6 flex items-center justify-between gap-3
+             px-4 py-3 border border-gray-300 rounded-lg cursor-pointer
+             hover:border-green-500 hover:bg-green-50 transition"
+        >
+          <div className="flex flex-col">
+            <span className="font-semibold text-gray-800">
+              {mapFile ? "파일 선택됨" : "지도 이미지 업로드"}
+            </span>
+            <span className="text-sm text-gray-500">
+              {mapFile ? mapFile.name : "PNG, JPG 등 이미지 파일"}
+            </span>
+          </div>
+
+          <span
+            className="shrink-0 bg-green-600 hover:bg-green-700 text-white text-sm font-bold
+                   px-4 py-2 rounded-lg shadow"
+          >
+            파일 선택
+          </span>
+        </label>
 
         <button
           onClick={handleCreate}
