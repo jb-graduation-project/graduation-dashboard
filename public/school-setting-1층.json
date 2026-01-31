@@ -1,0 +1,176 @@
+{
+  "floor": "1층",
+  "image": {
+    "src": "blob:http://localhost:3000/fb16cfee-b8b3-4965-92d5-4d9130c8729f",
+    "natural": {
+      "w": 828,
+      "h": 285
+    }
+  },
+  "elements": [
+    {
+      "id": "auto-outline",
+      "type": "건물윤곽",
+      "points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 0,
+          "y": 284
+        },
+        {
+          "x": 827,
+          "y": 284
+        },
+        {
+          "x": 827,
+          "y": 0
+        }
+      ],
+      "floor": 0
+    },
+    {
+      "id": "auto-room-1",
+      "type": "방",
+      "x": 13,
+      "y": 158,
+      "width": 74,
+      "height": 45,
+      "name": "교장실",
+      "floor": 0
+    },
+    {
+      "id": "auto-room-2",
+      "type": "방",
+      "x": 747,
+      "y": 157,
+      "width": 75,
+      "height": 46,
+      "name": "전처리실",
+      "floor": 0
+    },
+    {
+      "id": "auto-room-4",
+      "type": "방",
+      "x": 463,
+      "y": 157,
+      "width": 74,
+      "height": 46,
+      "name": "보건실",
+      "floor": 0
+    },
+    {
+      "id": "auto-room-5",
+      "type": "방",
+      "x": 381,
+      "y": 157,
+      "width": 80,
+      "height": 46,
+      "name": "돌봄교실2",
+      "floor": 0
+    },
+    {
+      "id": "auto-room-6",
+      "type": "방",
+      "x": 240,
+      "y": 157,
+      "width": 74,
+      "height": 46,
+      "name": "초등특수",
+      "floor": 0
+    },
+    {
+      "id": "auto-room-7",
+      "type": "방",
+      "x": 596,
+      "y": 128,
+      "width": 150,
+      "height": 128,
+      "name": "식당",
+      "floor": 0
+    },
+    {
+      "id": "auto-room-10",
+      "type": "방",
+      "x": 614,
+      "y": 6,
+      "width": 129,
+      "height": 103,
+      "name": "유희실",
+      "floor": 0
+    },
+    {
+      "id": "auto-room-11",
+      "type": "안전 구역",
+      "x": 297,
+      "y": 6,
+      "width": 239,
+      "height": 102,
+      "name": "도서관",
+      "floor": 0
+    },
+    {
+      "id": "auto-room-13",
+      "type": "방",
+      "x": 12,
+      "y": 6,
+      "width": 188,
+      "height": 56,
+      "name": "시청각실",
+      "floor": 0
+    },
+    {
+      "id": "exit-1768447366336-5ly8",
+      "type": "비상구",
+      "x": 32,
+      "y": 85.3,
+      "width": 40,
+      "height": 40,
+      "floor": 0
+    },
+    {
+      "id": "exit-1768447373411-xccw",
+      "type": "비상구",
+      "x": 217,
+      "y": 179.3,
+      "width": 40,
+      "height": 40,
+      "floor": 0
+    },
+    {
+      "id": "exit-1768447427720-puwp",
+      "type": "비상구",
+      "x": 218,
+      "y": 19.3,
+      "width": 40,
+      "height": 40,
+      "floor": 0
+    },
+    {
+      "id": "1768447602745-0-tz55",
+      "type": "방",
+      "x": 313,
+      "y": 157,
+      "width": 68,
+      "height": 46,
+      "name": "돌봄교실1",
+      "floor": 0
+    },
+    {
+      "id": "exit-1768447997678-zbgt",
+      "type": "비상구",
+      "x": 509,
+      "y": 132.5,
+      "width": 40,
+      "height": 40,
+      "floor": 0
+    }
+  ],
+  "uiState": {
+    "mode": null,
+    "showImage": true,
+    "zoom": 1
+  }
+}

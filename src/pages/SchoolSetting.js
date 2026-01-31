@@ -62,11 +62,9 @@ export default function SchoolSetting() {
       elements: [],
       undoStack: [],
       redoStack: [],
-      // (자동분석 캐시 같은 건 프론트 전용이라도 UI용으로 유지 가능)
       hasAutoAnalysisResult: false,
       autoElementsCache: [],
-
-      autoAnalysisHidden: false, // 결과 숨김 상태
+      autoAnalysisHidden: false,
       abort: { analyze: null },
     };
   }, []);
@@ -78,7 +76,7 @@ export default function SchoolSetting() {
   const imageSrc = currentFloor.imageSrc;
   const imgNatural = currentFloor.imgNatural || { w: 0, h: 0 };
 
-  // ✅ elements는 useMemo로 고정 (eslint warning 방지)
+  // ✅ elements는 useMemo로 고정
   const elements = useMemo(() => {
     return currentFloor.elements ?? [];
   }, [currentFloor.elements]);
@@ -96,7 +94,7 @@ export default function SchoolSetting() {
         return next;
       });
     },
-    [currentFloorIndex, makeEmptyFloor]
+    [currentFloorIndex, makeEmptyFloor],
   );
 
   const pushUndoSnapshot = useCallback(() => {
@@ -176,7 +174,7 @@ export default function SchoolSetting() {
         const curr = next[floorIdx] || makeEmptyFloor();
         next[floorIdx] = {
           ...curr,
-          autoAnalysisHidden: false, // ⭐ 재실행 시 강제 표시
+          autoAnalysisHidden: false,
         };
         return next;
       });
@@ -198,7 +196,6 @@ export default function SchoolSetting() {
       try {
         const form = new FormData();
         form.append("image", file);
-        // ⛑ 안전장치 (이전 코드 섞여 있어도 안 터짐)
         form.append("file", file);
 
         const res = await fetch(`${API_BASE}/analyze-floorplan`, {
@@ -207,9 +204,8 @@ export default function SchoolSetting() {
           signal: controller.signal,
         });
 
-        // ✅ 여기!!
         if (!res.ok) {
-          const text = await res.text(); // FastAPI 에러 메시지 그대로 읽기
+          const text = await res.text();
           throw new Error(text);
         }
 
@@ -219,7 +215,7 @@ export default function SchoolSetting() {
           : [];
         const fixedElements = serverElements.map((el) => ({
           ...el,
-          floor: floorIdx, // ⭐ 현재 층으로 강제 지정
+          floor: floorIdx,
         }));
 
         if (myRunId !== analyzeRunIdRef.current) return;
@@ -255,12 +251,12 @@ export default function SchoolSetting() {
         }
       }
     },
-    [API_BASE, makeEmptyFloor, pushUndoSnapshot, setFloors]
+    [makeEmptyFloor, pushUndoSnapshot],
   );
 
   // ====== UI State ======
   const modeButtons = ["제한 구역", "방", "문", "비상구", "건물윤곽"];
-  const [mode, setMode] = useState(null); // null / 위 버튼들
+  const [mode, setMode] = useState(null);
   const modeRef = useRef(mode);
   useEffect(() => {
     modeRef.current = mode;
@@ -283,6 +279,117 @@ export default function SchoolSetting() {
 
   // 도움말
   const [showHelp, setShowHelp] = useState(false);
+
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [savedPlans, setSavedPlans] = useState([]);
+
+  const [selectedPlanId, setSelectedPlanId] = useState(null);
+  const selectedPlan = useMemo(
+    () => savedPlans.find((p) => p.id === selectedPlanId) || null,
+    [savedPlans, selectedPlanId],
+  );
+  const jsonInputRef = useRef(null);
+
+  useEffect(() => {
+    async function loadDefaultPlans() {
+      try {
+        const res = await fetch("/school-setting-1층.json");
+        if (!res.ok) throw new Error(await res.text());
+        const payload = await res.json();
+
+        if (!payload || !Array.isArray(payload.elements)) {
+          console.warn("구조도 JSON 형식이 아님");
+          return;
+        }
+
+        setSavedPlans((prev) => {
+          const exists = prev.some((p) => p.name === "school-setting-1층.json");
+          if (exists) return prev;
+
+          return [
+            ...prev,
+            {
+              id: "default-1f",
+              name: "school-setting-1층.json",
+              payload,
+            },
+          ];
+        });
+
+        // 기본 선택도 잡아주기(편의)
+        setSelectedPlanId((prev) => prev ?? "default-1f");
+      } catch (e) {
+        console.error("기본 구조도 로드 실패:", e);
+      }
+    }
+
+    loadDefaultPlans();
+  }, []);
+
+  const importPlanFiles = useCallback(async (files) => {
+    const arr = Array.from(files || []);
+    if (!arr.length) return;
+
+    for (const file of arr) {
+      try {
+        const text = await file.text();
+        const payload = JSON.parse(text);
+
+        if (!payload || !Array.isArray(payload.elements)) {
+          alert(`올바른 구조도 JSON이 아닙니다: ${file.name}`);
+          continue;
+        }
+
+        const id = Date.now() + Math.random();
+        setSavedPlans((prev) => [...prev, { id, name: file.name, payload }]);
+        setSelectedPlanId(id);
+      } catch (e) {
+        console.error(e);
+        alert(`JSON 읽기 실패: ${file.name}`);
+      }
+    }
+  }, []);
+
+  const applyPlan = useCallback(
+    (payload) => {
+      if (!payload || !Array.isArray(payload.elements)) {
+        alert("적용할 구조도 데이터가 올바르지 않습니다.");
+        return;
+      }
+
+      pushUndoSnapshot();
+
+      const fixed = payload.elements.map((el) => ({
+        ...el,
+        floor: currentFloorIndex,
+      }));
+
+      // ✅ 임시 테스트 기본 이미지: /img/1층.png
+      const raw = payload?.imagePath || payload?.image?.src || "/img/1층.png";
+      const imgPath =
+        typeof raw === "string" && raw.startsWith("blob:")
+          ? "/img/1층.png"
+          : raw;
+
+      setFloors((prev) => {
+        const next = [...prev];
+        const curr = next[currentFloorIndex] || makeEmptyFloor();
+        next[currentFloorIndex] = {
+          ...curr,
+          imageSrc: imgPath,
+          uploadedFile: null,
+          imgNatural: payload?.image?.natural
+            ? payload.image.natural
+            : curr.imgNatural,
+          elements: fixed,
+        };
+        return next;
+      });
+
+      setIsPlanModalOpen(false);
+    },
+    [currentFloorIndex, makeEmptyFloor, pushUndoSnapshot],
+  );
 
   // 컨텍스트 메뉴
   const [contextMenu, setContextMenu] = useState(null);
@@ -335,7 +442,7 @@ export default function SchoolSetting() {
 
       return { x: ox, y: oy };
     },
-    [imgNatural.h, imgNatural.w]
+    [imgNatural.h, imgNatural.w],
   );
 
   const applyZoomAroundPoint = useCallback(
@@ -376,7 +483,7 @@ export default function SchoolSetting() {
       const clamped = clampOffsetForScale(
         desiredOffsetX,
         desiredOffsetY,
-        newScale
+        newScale,
       );
       setImgOffset(clamped);
     },
@@ -387,7 +494,7 @@ export default function SchoolSetting() {
       imageSrc,
       imgNatural.h,
       imgNatural.w,
-    ]
+    ],
   );
 
   const zoomIn = useCallback(() => {
@@ -427,7 +534,7 @@ export default function SchoolSetting() {
       const localY = clientY - rect.top - imgTop;
       return { x: localX / displayedScale, y: localY / displayedScale };
     },
-    [displayedScale, imgLeft, imgTop]
+    [displayedScale, imgLeft, imgTop],
   );
 
   const isInsideImageNatural = useCallback(
@@ -436,7 +543,7 @@ export default function SchoolSetting() {
       n.y >= 0 &&
       n.x <= (imgNatural.w || 0) &&
       n.y <= (imgNatural.h || 0),
-    [imgNatural.h, imgNatural.w]
+    [imgNatural.h, imgNatural.w],
   );
 
   // Ctrl+wheel zoom (viewport 안에서만)
@@ -446,7 +553,6 @@ export default function SchoolSetting() {
       if (!rect) return;
       if (!imageSrc || !imageLoaded) return;
 
-      // 뷰포트 밖 무시
       if (
         e.clientX < rect.left ||
         e.clientX > rect.right ||
@@ -476,7 +582,6 @@ export default function SchoolSetting() {
       if (!imageSrc || !imageLoaded) return;
       if (e.ctrlKey) return;
 
-      // 세로로 넘칠 때만
       if (displayedH <= VIEW_H) return;
 
       e.preventDefault();
@@ -487,11 +592,11 @@ export default function SchoolSetting() {
       const clamped = clampOffsetForScale(
         imgOffsetRef.current.x,
         desiredY,
-        newScale
+        newScale,
       );
       setImgOffset(clamped);
     },
-    [clampOffsetForScale, displayedH, fitScale, imageLoaded, imageSrc, zoom]
+    [clampOffsetForScale, displayedH, fitScale, imageLoaded, imageSrc, zoom],
   );
 
   // ====== Space Panning ======
@@ -504,10 +609,6 @@ export default function SchoolSetting() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawStart, setDrawStart] = useState(null);
   const [preview, setPreview] = useState(null);
-
-  // ✅ (선택) drawStartRef로 안정적으로 쓰고 싶으면 아래도 가능
-  // const drawStartRef = useRef(drawStart);
-  // useEffect(() => { drawStartRef.current = drawStart; }, [drawStart]);
 
   // ====== Drag selection (box select) ======
   const [isBoxSelecting, setIsBoxSelecting] = useState(false);
@@ -525,7 +626,7 @@ export default function SchoolSetting() {
   }, [clipboard]);
 
   // ====== Resize ======
-  const [resizing, setResizing] = useState(null); // { id, handle, startNat, orig }
+  const [resizing, setResizing] = useState(null);
   const [editingResizeId, setEditingResizeId] = useState(null);
 
   // ====== Door rotate ======
@@ -540,13 +641,11 @@ export default function SchoolSetting() {
     outlineRawPointsRef.current = outlineRawPoints;
   }, [outlineRawPoints]);
 
-  // ✅ snapAngleTo45를 useCallback으로 고정(= finalizeOutlineFromRaw 안정화)
   const snapAngleTo45 = useCallback((rad) => {
     const step = Math.PI / 4;
     return Math.round(rad / step) * step;
   }, []);
 
-  // ✅ finalizeOutlineFromRaw도 useCallback으로 고정
   const finalizeOutlineFromRaw = useCallback(
     (rawPoints, closed = true) => {
       if (!rawPoints || rawPoints.length < 2)
@@ -593,10 +692,9 @@ export default function SchoolSetting() {
 
       return { points: snapped, rawPoints: [...rawPoints] };
     },
-    [snapAngleTo45]
+    [snapAngleTo45],
   );
 
-  // ✅ finalizeCurrentOutline deps에 finalizeOutlineFromRaw 추가 (eslint 경고 해결)
   const finalizeCurrentOutline = useCallback(() => {
     const raw = outlineRawPointsRef.current;
     if (!raw || raw.length < 3) {
@@ -653,7 +751,6 @@ export default function SchoolSetting() {
       for (let i = elements.length - 1; i >= 0; i--) {
         const el = elements[i];
 
-        // 다른 층 요소는 무시
         if ((el.floor ?? 0) !== currentFloorIndex) continue;
 
         if (el.type === "문") {
@@ -695,16 +792,16 @@ export default function SchoolSetting() {
       }
       return null;
     },
-    [elements, currentFloorIndex, displayedScale]
+    [elements, currentFloorIndex, displayedScale],
   );
 
-  // ====== Building bounds (for room clamp / auto adjust) ======
+  // ====== Building bounds ======
   const getBuildingBounds = useCallback(() => {
     const contours = elements.filter(
       (el) =>
         el.type === "건물윤곽" &&
         (el.floor ?? 0) === currentFloorIndex &&
-        el.points?.length
+        el.points?.length,
     );
 
     if (!contours.length) return null;
@@ -740,10 +837,9 @@ export default function SchoolSetting() {
 
       return { ...box, x, y, width, height };
     },
-    [getBuildingBounds]
+    [getBuildingBounds],
   );
 
-  // 방 자동 보정 (윤곽 바운딩 박스 안으로 + 겹치면 중간선 분할)
   const autoAdjustRooms = useCallback(() => {
     const boundsInfo = getBuildingBounds();
     if (!boundsInfo) {
@@ -760,29 +856,27 @@ export default function SchoolSetting() {
             (el.floor ?? 0) === currentFloorIndex &&
             (el.type === "방" ||
               el.type === "재난 구역" ||
-              el.type === "안전 구역")
+              el.type === "안전 구역"),
         )
         .map((r) => ({ ...r }));
 
       const doors = prev.filter(
-        (el) => (el.floor ?? 0) === currentFloorIndex && el.type === "문"
+        (el) => (el.floor ?? 0) === currentFloorIndex && el.type === "문",
       );
       const exits = prev.filter(
-        (el) => (el.floor ?? 0) === currentFloorIndex && el.type === "비상구"
+        (el) => (el.floor ?? 0) === currentFloorIndex && el.type === "비상구",
       );
 
       const others = prev.filter(
         (el) =>
           (el.floor ?? 0) !== currentFloorIndex ||
-          !["방", "재난 구역", "안전 구역", "문", "비상구"].includes(el.type)
+          !["방", "재난 구역", "안전 구역", "문", "비상구"].includes(el.type),
       );
 
-      // 1) 일단 바운딩 박스 안으로
       for (let i = 0; i < rooms.length; i++) {
         rooms[i] = clampRoomToBuildingBox(rooms[i]);
       }
 
-      // 2) 겹치면 중간선 분할(간단 정리)
       const n = rooms.length;
       for (let i = 0; i < n; i++) {
         for (let j = i + 1; j < n; j++) {
@@ -803,7 +897,6 @@ export default function SchoolSetting() {
           if (overlapX <= 0 || overlapY <= 0) continue;
 
           if (overlapX <= overlapY) {
-            // 세로로 나누기
             if (ax1 <= bx1) {
               const mid = (ax2 + bx1) / 2;
               a.width = Math.max(1e-3, mid - ax1);
@@ -816,7 +909,6 @@ export default function SchoolSetting() {
               a.width = Math.max(1e-3, ax2 - mid);
             }
           } else {
-            // 가로로 나누기
             if (ay1 <= by1) {
               const mid = (ay2 + by1) / 2;
               a.height = Math.max(1e-3, mid - ay1);
@@ -871,7 +963,6 @@ export default function SchoolSetting() {
         return next;
       });
 
-      // UI reset
       setMode(null);
       setImageLoaded(false);
       setFitScale(1);
@@ -885,9 +976,10 @@ export default function SchoolSetting() {
       setOutlinePoints([]);
       setContextMenu(null);
       setShowHelp(false);
+
       runAutoAnalyze(floorIdx, file);
     },
-    [currentFloorIndex, makeEmptyFloor]
+    [currentFloorIndex, makeEmptyFloor, runAutoAnalyze],
   );
 
   const onImgLoad = useCallback(
@@ -909,7 +1001,7 @@ export default function SchoolSetting() {
       setImgOffset({ x: 0, y: 0 });
       setImageLoaded(true);
     },
-    [currentFloorIndex, makeEmptyFloor]
+    [currentFloorIndex, makeEmptyFloor],
   );
 
   // ====== Floors UI ======
@@ -1046,10 +1138,8 @@ export default function SchoolSetting() {
 
   useEffect(() => {
     const onKeyDown = (e) => {
-      // 스페이스 패닝
       if (e.code === "Space") spacePressedRef.current = true;
 
-      // 입력 중이면 단축키 대부분 무시
       const active = document.activeElement;
       const isTyping =
         active &&
@@ -1058,7 +1148,6 @@ export default function SchoolSetting() {
           active.tagName === "SELECT" ||
           active.isContentEditable);
 
-      // 방향키 미세이동(선택 모드, 입력중X)
       if (
         !e.ctrlKey &&
         ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)
@@ -1089,7 +1178,6 @@ export default function SchoolSetting() {
             let nx = p.x + dx;
             let ny = p.y + dy;
 
-            // 문/비상구는 중심점 기반이라 간단 clamp
             if (p.type === "문" || p.type === "비상구") {
               nx = clamp(nx, 0, imgNatural.w);
               ny = clamp(ny, 0, imgNatural.h);
@@ -1099,12 +1187,11 @@ export default function SchoolSetting() {
             nx = clamp(nx, 0, imgNatural.w - w);
             ny = clamp(ny, 0, imgNatural.h - h);
             return { ...p, x: nx, y: ny };
-          })
+          }),
         );
         return;
       }
 
-      // Delete/Backspace 삭제
       if (!e.ctrlKey && (e.key === "Backspace" || e.key === "Delete")) {
         if (isTyping) return;
         const ids = selectedIdsRef.current;
@@ -1119,11 +1206,9 @@ export default function SchoolSetting() {
         return;
       }
 
-      // Ctrl 조합
       if (!e.ctrlKey) return;
       if (e.repeat) return;
 
-      // Ctrl+Z (윤곽 그리기 중이면 점 하나 되돌리기)
       if (e.key === "z" || e.key === "Z") {
         const isOutlineMode = modeRef.current === "건물윤곽";
         if (isOutlineMode && outlineRawPointsRef.current.length > 0) {
@@ -1143,7 +1228,6 @@ export default function SchoolSetting() {
         return;
       }
 
-      // Ctrl+Y
       if (e.key === "y" || e.key === "Y") {
         if (keyGuardRef.current.redo) return;
         keyGuardRef.current.redo = true;
@@ -1158,7 +1242,6 @@ export default function SchoolSetting() {
       const idsNow = selectedIdsRef.current;
       const selectedElements = elements.filter((p) => idsNow.includes(p.id));
 
-      // Ctrl+X
       if (e.key === "x" || e.key === "X") {
         if (!selectedElements.length) return;
         e.preventDefault();
@@ -1171,7 +1254,6 @@ export default function SchoolSetting() {
         return;
       }
 
-      // Ctrl+C
       if (e.key === "c" || e.key === "C") {
         if (!selectedElements.length) return;
         e.preventDefault();
@@ -1179,7 +1261,6 @@ export default function SchoolSetting() {
         return;
       }
 
-      // Ctrl+V
       if (e.key === "v" || e.key === "V") {
         const data = clipboardRef.current;
         if (!data || !Array.isArray(data) || !data.length) return;
@@ -1204,7 +1285,6 @@ export default function SchoolSetting() {
         return;
       }
 
-      // Ctrl+0 : 줌 리셋
       if (e.key === "0") {
         e.preventDefault();
         if (!imageSrc || !imageLoaded) return;
@@ -1213,7 +1293,6 @@ export default function SchoolSetting() {
         return;
       }
 
-      // Ctrl+'+' / Ctrl+'-'
       if (e.key === "=" || e.key === "+") {
         e.preventDefault();
         zoomIn();
@@ -1259,7 +1338,6 @@ export default function SchoolSetting() {
     const fn = (ev) => {
       if (ev.key !== "Escape") return;
 
-      // 윤곽 모드에서 점이 적으면 초기화
       if (
         modeRef.current === "건물윤곽" &&
         outlineRawPointsRef.current.length < 3
@@ -1280,14 +1358,15 @@ export default function SchoolSetting() {
       setPreview(null);
       setIsDrawing(false);
       setDrawStart(null);
+
+      // 모달 열려있으면 ESC로 닫기
+      setIsPlanModalOpen(false);
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
   }, []);
 
   // ====== Mouse interactions ======
-
-  // 그룹 드래그(요소 이동)
   const [dragging, setDragging] = useState(null);
   // dragging = { type: "elements", startNat, ids, origPositions }
 
@@ -1300,13 +1379,12 @@ export default function SchoolSetting() {
       });
       setDragging({ type: "elements", startNat, ids: [...ids], origPositions });
     },
-    [elements]
+    [elements],
   );
 
-  // 마우스 Down
   const onViewportMouseDown = useCallback(
     (e) => {
-      if (e.button === 2) return; // 우클릭은 contextMenu에서 처리
+      if (e.button === 2) return;
       if (!viewportRef.current) return;
       if (!imageSrc || !imageLoaded) return;
 
@@ -1323,7 +1401,6 @@ export default function SchoolSetting() {
       const inside = isInsideImageNatural(nat);
       const clicked = inside ? hitTestElement(nat) : null;
 
-      // 문 회전 확정
       if (rotatingDoorId && mode === "문") {
         setRotatingDoorId(null);
         return;
@@ -1331,9 +1408,7 @@ export default function SchoolSetting() {
       if (resizing) return;
       if (rotatingDoorId) return;
 
-      // ===== 선택 모드 =====
       if (mode === null) {
-        // Space+드래그 = 패닝
         if (
           !clicked &&
           inside &&
@@ -1347,7 +1422,6 @@ export default function SchoolSetting() {
           return;
         }
 
-        // 요소 클릭 선택
         if (clicked) {
           const elId = clicked.el.id;
           const current = selectedIdsRef.current;
@@ -1365,17 +1439,15 @@ export default function SchoolSetting() {
           setSelectedId(
             newSelectedIds.length
               ? newSelectedIds[newSelectedIds.length - 1]
-              : null
+              : null,
           );
           setContextMenu(null);
           setEditingResizeId(null);
 
-          // 바로 드래그 시작
           startElementsDrag(newSelectedIds, nat);
           return;
         }
 
-        // 빈 공간 = 박스 선택 시작
         setSelectedId(null);
         setSelectedIds([]);
         setDragging(null);
@@ -1395,7 +1467,6 @@ export default function SchoolSetting() {
         return;
       }
 
-      // ===== 문 모드 =====
       if (mode === "문" && inside) {
         pushUndoSnapshot();
         const id = `door-${Date.now()}-${Math.random()
@@ -1416,7 +1487,6 @@ export default function SchoolSetting() {
         return;
       }
 
-      // ===== 비상구 모드 =====
       if (mode === "비상구" && inside) {
         pushUndoSnapshot();
         const id = `exit-${Date.now()}-${Math.random()
@@ -1438,7 +1508,6 @@ export default function SchoolSetting() {
         return;
       }
 
-      // ===== 건물 윤곽 모드 =====
       if (mode === "건물윤곽" && inside) {
         const naturalSnapClose = 8 / displayedScale;
 
@@ -1462,7 +1531,6 @@ export default function SchoolSetting() {
         return;
       }
 
-      // ===== 박스 모드 =====
       if (["제한 구역", "방", "재난 구역", "안전 구역"].includes(mode)) {
         if (mode !== "제한 구역" && !inside) return;
 
@@ -1498,10 +1566,9 @@ export default function SchoolSetting() {
       currentFloorIndex,
       setElements,
       startElementsDrag,
-    ]
+    ],
   );
 
-  // 마우스 Move
   const onViewportMouseMove = useCallback(
     (e) => {
       if (!imageSrc || !imageLoaded) return;
@@ -1511,7 +1578,6 @@ export default function SchoolSetting() {
       const nat = clientToNatural(e.clientX, e.clientY);
       const inside = isInsideImageNatural(nat);
 
-      // hover
       const hitForHover = inside ? hitTestElement(nat) : null;
       if (hitForHover) {
         if (hitForHover.kind === "contour-seg") {
@@ -1531,7 +1597,6 @@ export default function SchoolSetting() {
         setHover(null);
       }
 
-      // 패닝
       if (isPanning && panStartRef.current && panOriginRef.current) {
         const dx = e.clientX - panStartRef.current.x;
         const dy = e.clientY - panStartRef.current.y;
@@ -1545,7 +1610,6 @@ export default function SchoolSetting() {
         return;
       }
 
-      // 박스 선택 드래그
       if (isBoxSelecting && selectionStartRef.current) {
         const sx = selectionStartRef.current.x - rect.left;
         const sy = selectionStartRef.current.y - rect.top;
@@ -1560,7 +1624,6 @@ export default function SchoolSetting() {
         return;
       }
 
-      // 리사이즈
       if (resizing) {
         const { id, handle, startNat, orig } = resizing;
         const dx = nat.x - startNat.x;
@@ -1591,13 +1654,12 @@ export default function SchoolSetting() {
 
         setElements((prev) =>
           prev.map((p) =>
-            p.id === id ? { ...p, x: nx, y: ny, width: nw, height: nh } : p
-          )
+            p.id === id ? { ...p, x: nx, y: ny, width: nw, height: nh } : p,
+          ),
         );
         return;
       }
 
-      // 문 회전(45도 스냅)
       if (rotatingDoorId) {
         setElements((prev) =>
           prev.map((p) => {
@@ -1607,12 +1669,11 @@ export default function SchoolSetting() {
             let angle = (Math.atan2(dy, dx) * 180) / Math.PI;
             const snapped = Math.round(angle / 45) * 45;
             return { ...p, angle: snapped };
-          })
+          }),
         );
         return;
       }
 
-      // 요소 그룹 드래그
       if (dragging && dragging.type === "elements" && mode === null && inside) {
         const dx = nat.x - dragging.startNat.x;
         const dy = nat.y - dragging.startNat.y;
@@ -1636,12 +1697,11 @@ export default function SchoolSetting() {
             const nx = clamp(orig.x + dx, 0, imgNatural.w - w);
             const ny = clamp(orig.y + dy, 0, imgNatural.h - h);
             return { ...p, x: nx, y: ny };
-          })
+          }),
         );
         return;
       }
 
-      // 박스 미리보기
       if (isDrawing && drawStart) {
         if (mode !== "제한 구역" && !inside) return;
 
@@ -1689,12 +1749,10 @@ export default function SchoolSetting() {
       zoom,
       currentFloorIndex,
       setElements,
-    ]
+    ],
   );
 
-  // 마우스 Up
   const onViewportMouseUp = useCallback(() => {
-    // 문: 찍고 나서 각도 조정 시작
     if (pendingDoorId) {
       setRotatingDoorId(pendingDoorId);
       setPendingDoorId(null);
@@ -1702,7 +1760,6 @@ export default function SchoolSetting() {
 
     if (isPanning) setIsPanning(false);
 
-    // 박스 선택 종료
     if (isBoxSelecting && selectionRect && viewportRef.current) {
       const vpRect = viewportRef.current.getBoundingClientRect();
       const toNatural = (sx, sy) =>
@@ -1711,7 +1768,7 @@ export default function SchoolSetting() {
       const p1 = toNatural(selectionRect.x, selectionRect.y);
       const p2 = toNatural(
         selectionRect.x + selectionRect.w,
-        selectionRect.y + selectionRect.h
+        selectionRect.y + selectionRect.h,
       );
 
       const minX = Math.min(p1.x, p2.x);
@@ -1754,10 +1811,8 @@ export default function SchoolSetting() {
       setSelectionRect(null);
     }
 
-    // 리사이즈 종료
     if (resizing) setResizing(null);
 
-    // 박스 생성 완료
     if (isDrawing && preview) {
       if (mode === "방") {
         const name = window.prompt("이 방의 이름을 입력하세요:", "");
@@ -1818,7 +1873,6 @@ export default function SchoolSetting() {
     setElements,
   ]);
 
-  // 컨텍스트 메뉴(우클릭)
   const onViewportContextMenu = useCallback(
     (e) => {
       e.preventDefault();
@@ -1827,7 +1881,6 @@ export default function SchoolSetting() {
       const nat = clientToNatural(e.clientX, e.clientY);
       const hit = isInsideImageNatural(nat) ? hitTestElement(nat) : null;
 
-      // 빈 공간
       if (!hit) {
         const opts = [
           {
@@ -1864,50 +1917,45 @@ export default function SchoolSetting() {
         return;
       }
 
-      // 요소 우클릭: 선택
       setSelectedId(hit.el.id);
       setSelectedIds([hit.el.id]);
 
       const opts = [];
 
-      // 건물윤곽은 삭제만(간단)
-      // ✅ 윤곽 우클릭: "해당 윤곽 삭제" + "윤곽 전체 삭제" 둘 다 띄우기
       if (hit.el.type === "건물윤곽") {
-        // 1) 이 윤곽만 삭제
-        opts.push({
-          label: "이 윤곽 삭제",
-          action: () => {
-            pushUndoSnapshot();
-            setElements((prev) => prev.filter((p) => p.id !== hit.el.id));
-            setContextMenu(null);
-            setSelectedId(null);
-            setSelectedIds([]);
-            setEditingResizeId(null);
+        opts.push(
+          {
+            label: "이 윤곽 삭제",
+            action: () => {
+              pushUndoSnapshot();
+              setElements((prev) => prev.filter((p) => p.id !== hit.el.id));
+              setContextMenu(null);
+              setSelectedId(null);
+              setSelectedIds([]);
+              setEditingResizeId(null);
+            },
           },
-        });
-
-        // 2) 현재 층의 윤곽 전부 삭제
-        opts.push({
-          label: "윤곽 전체 삭제",
-          action: () => {
-            pushUndoSnapshot();
-            setElements((prev) =>
-              prev.filter(
-                (p) =>
-                  !(
-                    (p.floor ?? 0) === currentFloorIndex &&
-                    p.type === "건물윤곽"
-                  )
-              )
-            );
-            setContextMenu(null);
-            setSelectedId(null);
-            setSelectedIds([]);
-            setEditingResizeId(null);
+          {
+            label: "윤곽 전체 삭제",
+            action: () => {
+              pushUndoSnapshot();
+              setElements((prev) =>
+                prev.filter(
+                  (p) =>
+                    !(
+                      (p.floor ?? 0) === currentFloorIndex &&
+                      p.type === "건물윤곽"
+                    ),
+                ),
+              );
+              setContextMenu(null);
+              setSelectedId(null);
+              setSelectedIds([]);
+              setEditingResizeId(null);
+            },
           },
-        });
+        );
       } else {
-        // ✅ 윤곽이 아닌 일반 요소: 기존처럼 "삭제"
         opts.push({
           label: "삭제",
           action: () => {
@@ -1921,7 +1969,6 @@ export default function SchoolSetting() {
         });
       }
 
-      // 제한구역: 리사이즈 모드
       if (hit.el.type === "제한 구역") {
         opts.push({
           label: "형태 수정(리사이즈)",
@@ -1933,7 +1980,6 @@ export default function SchoolSetting() {
         });
       }
 
-      // 방/재난/안전: 타입 변경 + 이름 수정 + 리사이즈
       if (["방", "재난 구역", "안전 구역"].includes(hit.el.type)) {
         opts.push(
           {
@@ -1941,7 +1987,9 @@ export default function SchoolSetting() {
             action: () => {
               pushUndoSnapshot();
               setElements((prev) =>
-                prev.map((p) => (p.id === hit.el.id ? { ...p, type: "방" } : p))
+                prev.map((p) =>
+                  p.id === hit.el.id ? { ...p, type: "방" } : p,
+                ),
               );
               setContextMenu(null);
             },
@@ -1952,8 +2000,8 @@ export default function SchoolSetting() {
               pushUndoSnapshot();
               setElements((prev) =>
                 prev.map((p) =>
-                  p.id === hit.el.id ? { ...p, type: "재난 구역" } : p
-                )
+                  p.id === hit.el.id ? { ...p, type: "재난 구역" } : p,
+                ),
               );
               setContextMenu(null);
             },
@@ -1964,8 +2012,8 @@ export default function SchoolSetting() {
               pushUndoSnapshot();
               setElements((prev) =>
                 prev.map((p) =>
-                  p.id === hit.el.id ? { ...p, type: "안전 구역" } : p
-                )
+                  p.id === hit.el.id ? { ...p, type: "안전 구역" } : p,
+                ),
               );
               setContextMenu(null);
             },
@@ -1978,7 +2026,7 @@ export default function SchoolSetting() {
               if (name !== null) {
                 pushUndoSnapshot();
                 setElements((prev) =>
-                  prev.map((p) => (p.id === hit.el.id ? { ...p, name } : p))
+                  prev.map((p) => (p.id === hit.el.id ? { ...p, name } : p)),
                 );
               }
               setContextMenu(null);
@@ -1991,11 +2039,10 @@ export default function SchoolSetting() {
               setEditingResizeId(hit.el.id);
               setContextMenu(null);
             },
-          }
+          },
         );
       }
 
-      // 문: 180도 + 각도 드래그
       if (hit.el.type === "문") {
         opts.push(
           {
@@ -2006,7 +2053,7 @@ export default function SchoolSetting() {
                 prev.map((p) => {
                   if (p.id !== hit.el.id) return p;
                   return { ...p, angle: ((p.angle || 0) + 180) % 360 };
-                })
+                }),
               );
               setContextMenu(null);
             },
@@ -2017,7 +2064,7 @@ export default function SchoolSetting() {
               setRotatingDoorId(hit.el.id);
               setContextMenu(null);
             },
-          }
+          },
         );
       }
 
@@ -2035,10 +2082,10 @@ export default function SchoolSetting() {
       performUndoOnce,
       pushUndoSnapshot,
       setElements,
-    ]
+      currentFloorIndex,
+    ],
   );
 
-  // 메뉴 밖 클릭 시 닫기 + 화면 밖 클릭 시 선택 해제
   useEffect(() => {
     function onDocMouseDown(e) {
       if (contextMenu && menuRef.current && !menuRef.current.contains(e.target))
@@ -2164,6 +2211,33 @@ export default function SchoolSetting() {
                 이미지 업로드
               </button>
 
+              {/* JSON 숨김 input */}
+              <input
+                ref={jsonInputRef}
+                type="file"
+                accept=".json,application/json"
+                multiple
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  importPlanFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+
+              <button
+                onClick={() => setIsPlanModalOpen(true)}
+                className={btnGray}
+              >
+                구조도 목록
+              </button>
+
+              <button
+                onClick={() => jsonInputRef.current?.click()}
+                className={btnGray}
+              >
+                JSON 추가
+              </button>
+
               <button
                 onClick={() => setShowImage((p) => !p)}
                 className={btnGray}
@@ -2216,7 +2290,7 @@ export default function SchoolSetting() {
 
           {/* 모드 버튼 */}
           <div className="flex flex-wrap gap-2 items-center">
-            {/* ✅ 자동 분석 컨트롤 */}
+            {/* 자동 분석 컨트롤 */}
             {autoAnalyzing ? (
               <div className="flex items-center gap-2">
                 <div className="text-sm font-semibold text-gray-700">
@@ -2252,13 +2326,12 @@ export default function SchoolSetting() {
 
                     next[currentFloorIndex] = {
                       ...curr,
-                      elements: [], // ⭐ 화면에서 숨김(제거)
-                      autoAnalysisHidden: true, // ⭐ 숨김 상태로 전환
+                      elements: [],
+                      autoAnalysisHidden: true,
                     };
                     return next;
                   });
 
-                  // 선택/리사이즈 중이면 같이 초기화(안 해도 되지만 안전)
                   setSelectedId(null);
                   setSelectedIds([]);
                   setEditingResizeId(null);
@@ -2279,8 +2352,8 @@ export default function SchoolSetting() {
 
                     next[currentFloorIndex] = {
                       ...curr,
-                      elements: curr.autoElementsCache || [], // ⭐ 캐시에서 복구
-                      autoAnalysisHidden: false, // ⭐ 다시 보이게
+                      elements: curr.autoElementsCache || [],
+                      autoAnalysisHidden: false,
                     };
                     return next;
                   });
@@ -2297,8 +2370,6 @@ export default function SchoolSetting() {
                     alert("업로드된 원본 이미지가 없습니다.");
                     return;
                   }
-
-                  // ⭐ FastAPI 재분석 실행
                   runAutoAnalyze(currentFloorIndex, curr.uploadedFile);
                 }}
                 className={btnSub}
@@ -2307,6 +2378,7 @@ export default function SchoolSetting() {
                 자동 분석하기
               </button>
             )}
+
             <div className="text-sm font-semibold text-gray-700 mr-2">
               도구:
             </div>
@@ -2369,15 +2441,15 @@ export default function SchoolSetting() {
                 onClick={handleSaveJSON}
                 disabled={!imageSrc}
                 className="
-        px-4 py-2
-        rounded
-        bg-[#2E7D32]
-        text-white
-        font-bold
-        shadow
-        hover:bg-[#256428]
-        disabled:opacity-60
-      "
+                  px-4 py-2
+                  rounded
+                  bg-[#2E7D32]
+                  text-white
+                  font-bold
+                  shadow
+                  hover:bg-[#256428]
+                  disabled:opacity-60
+                "
               >
                 저장
               </button>
@@ -2533,12 +2605,11 @@ export default function SchoolSetting() {
                 zIndex: 45,
               }}
             >
-              {/* 채움 */}
               {elements
                 .filter(
                   (el) =>
                     el.type === "건물윤곽" &&
-                    (el.floor ?? 0) === currentFloorIndex
+                    (el.floor ?? 0) === currentFloorIndex,
                 )
                 .map((el) => {
                   if (!el.points || el.points.length < 3) return null;
@@ -2548,7 +2619,7 @@ export default function SchoolSetting() {
                         (p, i) =>
                           `${i === 0 ? "M" : "L"} ${p.x * displayedScale} ${
                             p.y * displayedScale
-                          }`
+                          }`,
                       )
                       .join(" ") + " Z";
                   return (
@@ -2561,12 +2632,11 @@ export default function SchoolSetting() {
                   );
                 })}
 
-              {/* 선 */}
               {elements
                 .filter(
                   (el) =>
                     el.type === "건물윤곽" &&
-                    (el.floor ?? 0) === currentFloorIndex
+                    (el.floor ?? 0) === currentFloorIndex,
                 )
                 .map((el) => {
                   const pts = el.points || [];
@@ -2599,13 +2669,13 @@ export default function SchoolSetting() {
                   });
                 })}
 
-              {/* 윤곽 프리뷰 */}
               {outlinePoints.length > 0 && (
                 <>
                   <polyline
                     points={outlinePoints
                       .map(
-                        (p) => `${p.x * displayedScale},${p.y * displayedScale}`
+                        (p) =>
+                          `${p.x * displayedScale},${p.y * displayedScale}`,
                       )
                       .join(" ")}
                     fill="none"
@@ -2626,12 +2696,10 @@ export default function SchoolSetting() {
               )}
             </svg>
 
+            {/* 요소 렌더 */}
             {elements
               .filter((el) => (el.floor ?? 0) === currentFloorIndex)
               .map((el) => {
-                // =========================
-                // 1) 문
-                // =========================
                 if (el.type === "문") {
                   const dispX = natToDispX(el.x);
                   const dispY = natToDispY(el.y);
@@ -2667,7 +2735,6 @@ export default function SchoolSetting() {
                             ev.stopPropagation();
                             const nat = clientToNatural(ev.clientX, ev.clientY);
 
-                            // 선택 처리
                             const elId = el.id;
                             const current = selectedIds.length
                               ? selectedIds
@@ -2684,12 +2751,11 @@ export default function SchoolSetting() {
 
                             setSelectedIds(newSelectedIds);
                             setSelectedId(
-                              newSelectedIds[newSelectedIds.length - 1]
+                              newSelectedIds[newSelectedIds.length - 1],
                             );
                             setContextMenu(null);
                             setEditingResizeId(null);
 
-                            // 드래그 시작
                             pushUndoSnapshot();
                             startElementsDrag(newSelectedIds, nat);
                           }
@@ -2707,8 +2773,8 @@ export default function SchoolSetting() {
                             mode === null
                               ? "grab"
                               : mode === "문"
-                              ? "crosshair"
-                              : "default",
+                                ? "crosshair"
+                                : "default",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -2722,10 +2788,10 @@ export default function SchoolSetting() {
                             border: isRotating
                               ? "3px solid #ffb84d"
                               : isSelectedDoor
-                              ? "2px solid #0b74de"
-                              : isHoverDoor
-                              ? "2px dashed #0b74de"
-                              : "1px solid rgba(0,0,0,0.4)",
+                                ? "2px solid #0b74de"
+                                : isHoverDoor
+                                  ? "2px dashed #0b74de"
+                                  : "1px solid rgba(0,0,0,0.4)",
                             borderRadius: 2,
                             boxSizing: "border-box",
                           }}
@@ -2735,9 +2801,6 @@ export default function SchoolSetting() {
                   );
                 }
 
-                // =========================
-                // 2) 비상구
-                // =========================
                 if (el.type === "비상구") {
                   const dispX = natToDispX(el.x);
                   const dispY = natToDispY(el.y);
@@ -2774,7 +2837,7 @@ export default function SchoolSetting() {
 
                           setSelectedIds(newSelectedIds);
                           setSelectedId(
-                            newSelectedIds[newSelectedIds.length - 1]
+                            newSelectedIds[newSelectedIds.length - 1],
                           );
                           setContextMenu(null);
                           setEditingResizeId(null);
@@ -2791,8 +2854,8 @@ export default function SchoolSetting() {
                         border: isSelectedExit
                           ? "3px solid #0b74de"
                           : isHoverExit
-                          ? "2px dashed #ff8800"
-                          : "2px solid #0b5c2f",
+                            ? "2px dashed #ff8800"
+                            : "2px solid #0b5c2f",
                         borderRadius: 4,
                         boxSizing: "border-box",
                         zIndex: isSelectedExit ? 42 : 32,
@@ -2810,14 +2873,8 @@ export default function SchoolSetting() {
                   );
                 }
 
-                // =========================
-                // 3) 건물윤곽은 여기서 렌더 X (SVG에서 렌더)
-                // =========================
                 if (el.type === "건물윤곽") return null;
 
-                // =========================
-                // 4) 박스(방/제한/재난/안전)
-                // =========================
                 const isHoverBox =
                   hover && hover.kind === "box" && hover.id === el.id;
                 const isSelectedBox = selectedIds.includes(el.id);
@@ -2850,7 +2907,7 @@ export default function SchoolSetting() {
 
                         setSelectedIds(newSelectedIds);
                         setSelectedId(
-                          newSelectedIds[newSelectedIds.length - 1]
+                          newSelectedIds[newSelectedIds.length - 1],
                         );
                         setContextMenu(null);
                         setEditingResizeId(null);
@@ -2867,8 +2924,8 @@ export default function SchoolSetting() {
                       border: isSelectedBox
                         ? "3px solid #0b74de"
                         : isHoverBox
-                        ? "2px dashed #ff8800"
-                        : "2px solid rgba(0,0,0,0.5)",
+                          ? "2px dashed #ff8800"
+                          : "2px solid rgba(0,0,0,0.5)",
                       boxSizing: "border-box",
                       zIndex: isSelectedBox ? 40 : 30,
                       pointerEvents: "auto",
@@ -2998,6 +3055,137 @@ export default function SchoolSetting() {
           </div>
         )}
       </div>
+
+      {/* ✅ 구조도 목록 팝업 (중복 제거 + X 닫기) */}
+      {isPlanModalOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center"
+          onMouseDown={() => setIsPlanModalOpen(false)}
+        >
+          <div
+            className="bg-white w-[820px] max-h-[520px] rounded-lg shadow p-4 overflow-hidden relative"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-bold">저장된 구조도</div>
+              <button
+                onClick={() => setIsPlanModalOpen(false)}
+                className="w-9 h-9 rounded hover:bg-gray-100 text-gray-700 text-xl leading-none"
+                aria-label="닫기"
+                title="닫기"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="flex gap-3">
+              {/* 왼쪽: 목록 */}
+              <div className="w-[320px] border rounded p-2 overflow-auto max-h-[440px]">
+                {savedPlans.length === 0 && (
+                  <div className="text-sm text-gray-500 p-2">
+                    추가된 JSON 없음
+                  </div>
+                )}
+
+                {savedPlans.map((plan) => {
+                  const active = plan.id === selectedPlanId;
+                  const count = plan.payload?.elements?.length ?? 0;
+
+                  return (
+                    <button
+                      key={plan.id}
+                      onClick={() => setSelectedPlanId(plan.id)}
+                      className={`w-full text-left p-3 mb-2 border rounded hover:bg-gray-50 ${
+                        active ? "bg-gray-50 border-gray-400" : ""
+                      }`}
+                    >
+                      <div className="font-semibold">{plan.name}</div>
+                      <div className="text-xs text-gray-500">
+                        elements: {count}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* 오른쪽: 미리보기 */}
+              <div className="flex-1 border rounded p-3 overflow-auto max-h-[440px]">
+                {!selectedPlan ? (
+                  <div className="text-sm text-gray-500">
+                    왼쪽에서 구조도를 선택하세요
+                  </div>
+                ) : (
+                  <>
+                    {(() => {
+                      // ✅ 임시 테스트 기본 이미지: /img/1층.png
+                      const raw =
+                        selectedPlan.payload?.imagePath ||
+                        selectedPlan.payload?.image?.src ||
+                        "/img/1층.png";
+
+                      const imgPath =
+                        typeof raw === "string" && raw.startsWith("blob:")
+                          ? "/img/1층.png"
+                          : raw;
+
+                      return (
+                        <div className="mb-3">
+                          <img
+                            src={imgPath}
+                            alt="plan preview"
+                            style={{
+                              width: "100%",
+                              maxHeight: 260,
+                              objectFit: "contain",
+                              border: "1px solid #eee",
+                              borderRadius: 6,
+                              background: "#fafafa",
+                            }}
+                            onError={(e) => {
+                              e.currentTarget.style.display = "none";
+                            }}
+                          />
+                        </div>
+                      );
+                    })()}
+
+                    {(() => {
+                      const els = selectedPlan.payload?.elements || [];
+                      const countByType = els.reduce((acc, el) => {
+                        const t = el.type || "unknown";
+                        acc[t] = (acc[t] || 0) + 1;
+                        return acc;
+                      }, {});
+                      return (
+                        <div className="text-sm">
+                          <div className="font-semibold mb-2">요소 요약</div>
+                          <div className="text-xs text-gray-600 mb-2">
+                            총 {els.length}개
+                          </div>
+                          <ul className="text-sm list-disc pl-5">
+                            {Object.entries(countByType).map(([t, c]) => (
+                              <li key={t}>
+                                {t}: {c}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })()}
+
+                    <button
+                      onClick={() => applyPlan(selectedPlan.payload)}
+                      className="mt-4 w-full bg-[#2E7D32] text-white rounded py-2 font-bold"
+                    >
+                      이 구조도를 현재 층에 적용
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
