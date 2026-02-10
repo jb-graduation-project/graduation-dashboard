@@ -19,23 +19,51 @@ export default function SchoolSetting() {
   const fileInputRef = useRef(null);
   const viewportRef = useRef(null);
   const menuRef = useRef(null);
+  const jsonInputRef = useRef(null);
+
   const [autoAnalyzing, setAutoAnalyzing] = useState(false);
 
   const [currentFloorIndex, setCurrentFloorIndex] = useState(0);
-
-  const analyzeRunIdRef = useRef(0);
   const currentFloorIndexRef = useRef(0);
-
   useEffect(() => {
     currentFloorIndexRef.current = currentFloorIndex;
   }, [currentFloorIndex]);
+
+  // 구조도(플랜) 모달
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [savedPlans, setSavedPlans] = useState([]);
+
+  const analyzeRunIdRef = useRef(0);
+
+  const toPublicImg = (raw) => {
+    if (!raw || typeof raw !== "string") return "/img/1층.png";
+    const s = raw.trim();
+    const name = s.split(/[/\\]/).pop(); // 윈도우/상대경로/파일명 모두 처리
+    return name ? `/img/${name}` : "/img/1층.png";
+  };
+
+  const planPreviewRef = useRef(null);
+  const [planPreviewW, setPlanPreviewW] = useState(0);
+
+  useEffect(() => {
+    if (!isPlanModalOpen) return;
+    const el = planPreviewRef.current;
+    if (!el) return;
+
+    const ro = new ResizeObserver(() => {
+      setPlanPreviewW(el.clientWidth || 0);
+    });
+    ro.observe(el);
+    setPlanPreviewW(el.clientWidth || 0);
+
+    return () => ro.disconnect();
+  }, [isPlanModalOpen]);
 
   // ====== Helpers ======
   const clamp = useCallback((v, a, b) => Math.max(a, Math.min(b, v)), []);
   const round4 = (n) =>
     typeof n === "number" ? Math.round(n * 10000) / 10000 : n;
 
-  // 색상 헬퍼
   function typeColor(type, alpha = 0.25) {
     switch (type) {
       case "제한 구역":
@@ -46,18 +74,16 @@ export default function SchoolSetting() {
         return `rgba(0,200,0,${alpha})`;
       case "방":
         return `rgba(0,112,255,${alpha})`;
-      case "복도":
-        return `rgba(160,160,160,${alpha})`;
       default:
         return `rgba(0,0,0,0)`;
     }
   }
 
-  // ====== Floor ======
+  // ====== Floor model ======
   const makeEmptyFloor = useCallback(() => {
     return {
       imageSrc: null,
-      uploadedFile: null, // 프론트 전용이지만 일단 유지
+      uploadedFile: null,
       imgNatural: { w: 0, h: 0 },
       elements: [],
       undoStack: [],
@@ -76,12 +102,11 @@ export default function SchoolSetting() {
   const imageSrc = currentFloor.imageSrc;
   const imgNatural = currentFloor.imgNatural || { w: 0, h: 0 };
 
-  // ✅ elements는 useMemo로 고정
-  const elements = useMemo(() => {
-    return currentFloor.elements ?? [];
-  }, [currentFloor.elements]);
+  const elements = useMemo(
+    () => currentFloor.elements ?? [],
+    [currentFloor.elements],
+  );
 
-  // 현재 층만 업데이트하는 setter
   const setElements = useCallback(
     (updater) => {
       setFloors((prev) => {
@@ -138,7 +163,6 @@ export default function SchoolSetting() {
     setFloors((prev) => {
       const next = [...prev];
       const curr = next[currentFloorIndex] || makeEmptyFloor();
-
       const redo = curr.redoStack || [];
       if (!redo.length) return prev;
 
@@ -154,11 +178,11 @@ export default function SchoolSetting() {
           JSON.parse(JSON.stringify(curr.elements || [])),
         ],
       };
-
       return next;
     });
   }, [currentFloorIndex, makeEmptyFloor]);
 
+  // ====== Auto analyze (optional) ======
   const runAutoAnalyze = useCallback(
     async (floorIdx, file) => {
       if (!file) {
@@ -172,10 +196,7 @@ export default function SchoolSetting() {
       setFloors((prev) => {
         const next = [...prev];
         const curr = next[floorIdx] || makeEmptyFloor();
-        next[floorIdx] = {
-          ...curr,
-          autoAnalysisHidden: false,
-        };
+        next[floorIdx] = { ...curr, autoAnalysisHidden: false };
         return next;
       });
 
@@ -204,10 +225,7 @@ export default function SchoolSetting() {
           signal: controller.signal,
         });
 
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text);
-        }
+        if (!res.ok) throw new Error(await res.text());
 
         const data = await res.json();
         const serverElements = Array.isArray(data.elements)
@@ -220,6 +238,8 @@ export default function SchoolSetting() {
 
         if (myRunId !== analyzeRunIdRef.current) return;
 
+        // 이 FloorIdx에 snapshot을 남기는 게 맞지만, 간단히 현재 층 기준으로 스냅샷
+        // (원하면 floorIdx 스냅샷로 바꿔도 됨)
         pushUndoSnapshot();
 
         setFloors((prev) => {
@@ -236,9 +256,8 @@ export default function SchoolSetting() {
         });
       } catch (e) {
         console.error("자동 분석 에러:", e);
-        if (e.name !== "AbortError") {
+        if (e?.name !== "AbortError")
           alert("자동 분석 실패\n" + (e?.message || "알 수 없는 오류"));
-        }
       } finally {
         if (myRunId === analyzeRunIdRef.current) {
           setAutoAnalyzing(false);
@@ -255,9 +274,10 @@ export default function SchoolSetting() {
   );
 
   // ====== UI State ======
-  const modeButtons = ["제한 구역", "방", "문", "비상구", "건물윤곽"];
+  const modeButtons = ["제한 구역", "방", "문", "비콘", "건물윤곽"];
   const [mode, setMode] = useState(null);
   const modeRef = useRef(mode);
+
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
@@ -265,31 +285,28 @@ export default function SchoolSetting() {
   const [showImage, setShowImage] = useState(true);
   const [imageLoaded, setImageLoaded] = useState(false);
 
-  // 선택
   const [selectedId, setSelectedId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
-  const selectedIdRef = useRef(selectedId);
   const selectedIdsRef = useRef(selectedIds);
-  useEffect(() => {
-    selectedIdRef.current = selectedId;
-  }, [selectedId]);
   useEffect(() => {
     selectedIdsRef.current = selectedIds;
   }, [selectedIds]);
 
-  // 도움말
   const [showHelp, setShowHelp] = useState(false);
 
-  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
-  const [savedPlans, setSavedPlans] = useState([]);
+  // 저장 모달
+  const [isSavePlanModalOpen, setIsSavePlanModalOpen] = useState(false);
+  const [savePlanName, setSavePlanName] = useState("");
 
   const [selectedPlanId, setSelectedPlanId] = useState(null);
+  const [planFloorIdx, setPlanFloorIdx] = useState(0);
+
   const selectedPlan = useMemo(
     () => savedPlans.find((p) => p.id === selectedPlanId) || null,
     [savedPlans, selectedPlanId],
   );
-  const jsonInputRef = useRef(null);
 
+  // 기본 구조도 하나 로드(테스트)
   useEffect(() => {
     async function loadDefaultPlans() {
       try {
@@ -297,7 +314,10 @@ export default function SchoolSetting() {
         if (!res.ok) throw new Error(await res.text());
         const payload = await res.json();
 
-        if (!payload || !Array.isArray(payload.elements)) {
+        if (
+          !payload ||
+          (!Array.isArray(payload.elements) && !Array.isArray(payload.floors))
+        ) {
           console.warn("구조도 JSON 형식이 아님");
           return;
         }
@@ -308,21 +328,15 @@ export default function SchoolSetting() {
 
           return [
             ...prev,
-            {
-              id: "default-1f",
-              name: "school-setting-1층.json",
-              payload,
-            },
+            { id: "default-1f", name: "school-setting-1층.json", payload },
           ];
         });
 
-        // 기본 선택도 잡아주기(편의)
         setSelectedPlanId((prev) => prev ?? "default-1f");
       } catch (e) {
         console.error("기본 구조도 로드 실패:", e);
       }
     }
-
     loadDefaultPlans();
   }, []);
 
@@ -335,14 +349,19 @@ export default function SchoolSetting() {
         const text = await file.text();
         const payload = JSON.parse(text);
 
-        if (!payload || !Array.isArray(payload.elements)) {
+        // (예전 포맷) { elements: [...] } 또는 (새 포맷) { floors: [...] }
+        const ok =
+          (payload && Array.isArray(payload.elements)) ||
+          (payload && Array.isArray(payload.floors));
+        if (!ok) {
           alert(`올바른 구조도 JSON이 아닙니다: ${file.name}`);
           continue;
         }
 
-        const id = Date.now() + Math.random();
+        const id = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         setSavedPlans((prev) => [...prev, { id, name: file.name, payload }]);
         setSelectedPlanId(id);
+        setPlanFloorIdx(0);
       } catch (e) {
         console.error(e);
         alert(`JSON 읽기 실패: ${file.name}`);
@@ -350,49 +369,37 @@ export default function SchoolSetting() {
     }
   }, []);
 
-  const applyPlan = useCallback(
-    (payload) => {
-      if (!payload || !Array.isArray(payload.elements)) {
-        alert("적용할 구조도 데이터가 올바르지 않습니다.");
-        return;
-      }
+  // 현재 파일의 “층 라벨”
+  const currentFloorLabel = useMemo(() => {
+    return floorNames[currentFloorIndex] || `${currentFloorIndex + 1}층`;
+  }, [currentFloorIndex, floorNames]);
 
-      pushUndoSnapshot();
+  // ====== Save plan to list ======
+  const saveCurrentPlanToList = useCallback(() => {
+    const name = (savePlanName || "").trim();
+    if (!name) {
+      alert("저장할 이름을 입력하세요.");
+      return;
+    }
 
-      const fixed = payload.elements.map((el) => ({
-        ...el,
-        floor: currentFloorIndex,
-      }));
+    const payload = {
+      floors: floors.map((f, idx) => ({
+        name: floorNames[idx] || `${idx + 1}층`,
+        image: {
+          src: f.imageSrc || "/img/1층.png",
+          natural: f.imgNatural || { w: 0, h: 0 },
+        },
+        elements: (f.elements || []).map((el) => ({ ...el, floor: idx })),
+      })),
+    };
 
-      // ✅ 임시 테스트 기본 이미지: /img/1층.png
-      const raw = payload?.imagePath || payload?.image?.src || "/img/1층.png";
-      const imgPath =
-        typeof raw === "string" && raw.startsWith("blob:")
-          ? "/img/1층.png"
-          : raw;
-
-      setFloors((prev) => {
-        const next = [...prev];
-        const curr = next[currentFloorIndex] || makeEmptyFloor();
-        next[currentFloorIndex] = {
-          ...curr,
-          imageSrc: imgPath,
-          uploadedFile: null,
-          imgNatural: payload?.image?.natural
-            ? payload.image.natural
-            : curr.imgNatural,
-          elements: fixed,
-        };
-        return next;
-      });
-
-      setIsPlanModalOpen(false);
-    },
-    [currentFloorIndex, makeEmptyFloor, pushUndoSnapshot],
-  );
-
-  // 컨텍스트 메뉴
-  const [contextMenu, setContextMenu] = useState(null);
+    const id = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setSavedPlans((prev) => [...prev, { id, name, payload }]);
+    setSelectedPlanId(id);
+    setPlanFloorIdx(0);
+    setIsSavePlanModalOpen(false);
+    setSavePlanName("");
+  }, [floors, floorNames, savePlanName]);
 
   // ====== Zoom & Pan ======
   const [fitScale, setFitScale] = useState(1);
@@ -418,10 +425,8 @@ export default function SchoolSetting() {
       const newBaseLeft = (VIEW_W - w) / 2;
       const newBaseTop = (VIEW_H - h) / 2;
 
-      // X
-      if (w <= VIEW_W) {
-        ox = 0;
-      } else {
+      if (w <= VIEW_W) ox = 0;
+      else {
         const minLeft = VIEW_W - w;
         const maxLeft = 0;
         const nextLeft = newBaseLeft + ox;
@@ -429,10 +434,8 @@ export default function SchoolSetting() {
         else if (nextLeft < minLeft) ox = minLeft - newBaseLeft;
       }
 
-      // Y
-      if (h <= VIEW_H) {
-        oy = 0;
-      } else {
+      if (h <= VIEW_H) oy = 0;
+      else {
         const minTop = VIEW_H - h;
         const maxTop = 0;
         const nextTop = newBaseTop + oy;
@@ -546,7 +549,7 @@ export default function SchoolSetting() {
     [imgNatural.h, imgNatural.w],
   );
 
-  // Ctrl+wheel zoom (viewport 안에서만)
+  // Ctrl+wheel zoom
   useEffect(() => {
     const handler = (e) => {
       const rect = viewportRef.current?.getBoundingClientRect();
@@ -576,29 +579,6 @@ export default function SchoolSetting() {
     return () => window.removeEventListener("wheel", handler);
   }, [applyZoomAroundPoint, clamp, imageLoaded, imageSrc, zoom]);
 
-  // 일반 휠 = 세로 스크롤(패닝)
-  const onViewportWheel = useCallback(
-    (e) => {
-      if (!imageSrc || !imageLoaded) return;
-      if (e.ctrlKey) return;
-
-      if (displayedH <= VIEW_H) return;
-
-      e.preventDefault();
-      const deltaY = e.deltaY;
-
-      const newScale = fitScale * zoom;
-      const desiredY = imgOffsetRef.current.y - deltaY;
-      const clamped = clampOffsetForScale(
-        imgOffsetRef.current.x,
-        desiredY,
-        newScale,
-      );
-      setImgOffset(clamped);
-    },
-    [clampOffsetForScale, displayedH, fitScale, imageLoaded, imageSrc, zoom],
-  );
-
   // ====== Space Panning ======
   const spacePressedRef = useRef(false);
   const [isPanning, setIsPanning] = useState(false);
@@ -610,20 +590,13 @@ export default function SchoolSetting() {
   const [drawStart, setDrawStart] = useState(null);
   const [preview, setPreview] = useState(null);
 
-  // ====== Drag selection (box select) ======
+  // ====== Drag selection ======
   const [isBoxSelecting, setIsBoxSelecting] = useState(false);
   const [selectionRect, setSelectionRect] = useState(null);
   const selectionStartRef = useRef(null);
 
   // ====== Hover ======
   const [hover, setHover] = useState(null);
-
-  // ====== Clipboard ======
-  const [clipboard, setClipboard] = useState(null);
-  const clipboardRef = useRef(clipboard);
-  useEffect(() => {
-    clipboardRef.current = clipboard;
-  }, [clipboard]);
 
   // ====== Resize ======
   const [resizing, setResizing] = useState(null);
@@ -666,6 +639,7 @@ export default function SchoolSetting() {
           snapped.push({ ...prevSnap });
           continue;
         }
+
         const angle = Math.atan2(dy, dx);
         const snapA = snapAngleTo45(angle);
         snapped.push({
@@ -705,9 +679,7 @@ export default function SchoolSetting() {
 
     const { points: snappedOutline, rawPoints: rawOutline } =
       finalizeOutlineFromRaw(raw, true);
-    const id = `outline-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2, 6)}`;
+    const id = `outline-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
     setElements((prev) => [
       ...prev,
@@ -730,7 +702,7 @@ export default function SchoolSetting() {
     setElements,
   ]);
 
-  // ====== Hit Test ======
+  // ====== Hit test ======
   function pointToSegmentDistance(p, a, b) {
     const vx = b.x - a.x;
     const vy = b.y - a.y;
@@ -750,7 +722,6 @@ export default function SchoolSetting() {
     (nat) => {
       for (let i = elements.length - 1; i >= 0; i--) {
         const el = elements[i];
-
         if ((el.floor ?? 0) !== currentFloorIndex) continue;
 
         if (el.type === "문") {
@@ -759,7 +730,7 @@ export default function SchoolSetting() {
           const dy = nat.y - el.y;
           if (dx * dx + dy * dy <= naturalR * naturalR)
             return { kind: "door", el };
-        } else if (el.type === "비상구") {
+        } else if (el.type === "비콘") {
           const w = el.width || 30;
           const h = el.height || 30;
           if (
@@ -768,7 +739,7 @@ export default function SchoolSetting() {
             nat.y >= el.y - h / 2 &&
             nat.y <= el.y + h / 2
           )
-            return { kind: "exit", el };
+            return { kind: "beacon", el };
         } else if (el.type === "건물윤곽") {
           const pts = el.points || [];
           for (let j = 0; j < pts.length; j++) {
@@ -794,148 +765,6 @@ export default function SchoolSetting() {
     },
     [elements, currentFloorIndex, displayedScale],
   );
-
-  // ====== Building bounds ======
-  const getBuildingBounds = useCallback(() => {
-    const contours = elements.filter(
-      (el) =>
-        el.type === "건물윤곽" &&
-        (el.floor ?? 0) === currentFloorIndex &&
-        el.points?.length,
-    );
-
-    if (!contours.length) return null;
-
-    let minX = Infinity,
-      minY = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity;
-
-    contours.forEach((el) => {
-      el.points.forEach((p) => {
-        minX = Math.min(minX, p.x);
-        minY = Math.min(minY, p.y);
-        maxX = Math.max(maxX, p.x);
-        maxY = Math.max(maxY, p.y);
-      });
-    });
-
-    return { minX, minY, maxX, maxY };
-  }, [elements, currentFloorIndex]);
-
-  const clampRoomToBuildingBox = useCallback(
-    (box) => {
-      const bounds = getBuildingBounds();
-      if (!bounds) return box;
-
-      let { x, y, width, height } = box;
-
-      if (x < bounds.minX) x = bounds.minX;
-      if (y < bounds.minY) y = bounds.minY;
-      if (x + width > bounds.maxX) x = bounds.maxX - width;
-      if (y + height > bounds.maxY) y = bounds.maxY - height;
-
-      return { ...box, x, y, width, height };
-    },
-    [getBuildingBounds],
-  );
-
-  const autoAdjustRooms = useCallback(() => {
-    const boundsInfo = getBuildingBounds();
-    if (!boundsInfo) {
-      alert("건물 윤곽이 있어야 방 보정을 할 수 있습니다.");
-      return;
-    }
-
-    pushUndoSnapshot();
-
-    setElements((prev) => {
-      const rooms = prev
-        .filter(
-          (el) =>
-            (el.floor ?? 0) === currentFloorIndex &&
-            (el.type === "방" ||
-              el.type === "재난 구역" ||
-              el.type === "안전 구역"),
-        )
-        .map((r) => ({ ...r }));
-
-      const doors = prev.filter(
-        (el) => (el.floor ?? 0) === currentFloorIndex && el.type === "문",
-      );
-      const exits = prev.filter(
-        (el) => (el.floor ?? 0) === currentFloorIndex && el.type === "비상구",
-      );
-
-      const others = prev.filter(
-        (el) =>
-          (el.floor ?? 0) !== currentFloorIndex ||
-          !["방", "재난 구역", "안전 구역", "문", "비상구"].includes(el.type),
-      );
-
-      for (let i = 0; i < rooms.length; i++) {
-        rooms[i] = clampRoomToBuildingBox(rooms[i]);
-      }
-
-      const n = rooms.length;
-      for (let i = 0; i < n; i++) {
-        for (let j = i + 1; j < n; j++) {
-          const a = rooms[i];
-          const b = rooms[j];
-
-          const ax1 = a.x,
-            ay1 = a.y,
-            ax2 = a.x + a.width,
-            ay2 = a.y + a.height;
-          const bx1 = b.x,
-            by1 = b.y,
-            bx2 = b.x + b.width,
-            by2 = b.y + b.height;
-
-          const overlapX = Math.min(ax2, bx2) - Math.max(ax1, bx1);
-          const overlapY = Math.min(ay2, by2) - Math.max(ay1, by1);
-          if (overlapX <= 0 || overlapY <= 0) continue;
-
-          if (overlapX <= overlapY) {
-            if (ax1 <= bx1) {
-              const mid = (ax2 + bx1) / 2;
-              a.width = Math.max(1e-3, mid - ax1);
-              b.x = mid;
-              b.width = Math.max(1e-3, bx2 - mid);
-            } else {
-              const mid = (bx2 + ax1) / 2;
-              b.width = Math.max(1e-3, mid - bx1);
-              a.x = mid;
-              a.width = Math.max(1e-3, ax2 - mid);
-            }
-          } else {
-            if (ay1 <= by1) {
-              const mid = (ay2 + by1) / 2;
-              a.height = Math.max(1e-3, mid - ay1);
-              b.y = mid;
-              b.height = Math.max(1e-3, by2 - mid);
-            } else {
-              const mid = (by2 + ay1) / 2;
-              b.height = Math.max(1e-3, mid - by1);
-              a.y = mid;
-              a.height = Math.max(1e-3, ay2 - mid);
-            }
-          }
-        }
-      }
-
-      for (let i = 0; i < rooms.length; i++)
-        rooms[i] = clampRoomToBuildingBox(rooms[i]);
-
-      return [...others, ...rooms, ...doors, ...exits];
-    });
-  }, [
-    clampRoomToBuildingBox,
-    currentFloorIndex,
-    getBuildingBounds,
-    pushUndoSnapshot,
-    setElements,
-  ]);
 
   // ====== Image upload ======
   const onImageChange = useCallback(
@@ -1023,15 +852,10 @@ export default function SchoolSetting() {
     setCurrentFloorIndex((p) => {
       const nextIdx = p + 1;
 
-      setFloorNames((names) => {
-        if (nextIdx < names.length) return names;
-        return [...names, `${nextIdx + 1}층`];
-      });
-
-      setFloors((fs) => {
-        if (nextIdx < fs.length) return fs;
-        return [...fs, makeEmptyFloor()];
-      });
+      setFloorNames((names) =>
+        nextIdx < names.length ? names : [...names, `${nextIdx + 1}층`],
+      );
+      setFloors((fs) => (nextIdx < fs.length ? fs : [...fs, makeEmptyFloor()]));
 
       return nextIdx;
     });
@@ -1061,81 +885,34 @@ export default function SchoolSetting() {
     });
   }, [currentFloorIndex, floorNames]);
 
-  const currentFloorLabel = useMemo(() => {
-    return floorNames[currentFloorIndex] || `${currentFloorIndex + 1}층`;
-  }, [currentFloorIndex, floorNames]);
+  // ====== Context menu ======
+  const [contextMenu, setContextMenu] = useState(null);
 
-  // ====== JSON Save ======
-  const handleSaveJSON = useCallback(() => {
-    const normalizedElements = (elements || [])
-      .filter((el) => (el.floor ?? 0) === currentFloorIndex)
-      .map((el) => {
-        if (el.type === "건물윤곽") {
-          return {
-            ...el,
-            points: (el.points || []).map((p) => ({
-              x: round4(p.x),
-              y: round4(p.y),
-            })),
-            rawPoints: el.rawPoints
-              ? el.rawPoints.map((p) => ({ x: round4(p.x), y: round4(p.y) }))
-              : undefined,
-          };
-        }
-        if (el.type === "문") {
-          return {
-            ...el,
-            x: round4(el.x),
-            y: round4(el.y),
-            angle: round4(el.angle || 0),
-          };
-        }
-        return {
-          ...el,
-          x: round4(el.x),
-          y: round4(el.y),
-          width: round4(el.width),
-          height: round4(el.height),
-        };
-      });
+  // ====== Wheel pan ======
+  const onViewportWheel = useCallback(
+    (e) => {
+      if (!imageSrc || !imageLoaded) return;
+      if (e.ctrlKey) return;
 
-    const payload = {
-      floor: currentFloorLabel,
-      image: {
-        src: imageSrc,
-        natural: { w: round4(imgNatural.w), h: round4(imgNatural.h) },
-      },
-      elements: normalizedElements,
-      uiState: {
-        mode,
-        showImage,
-        zoom: round4(zoom),
-      },
-    };
+      if (displayedH <= VIEW_H) return;
+      e.preventDefault();
 
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `school-setting-${currentFloorLabel}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }, [
-    currentFloorIndex,
-    currentFloorLabel,
-    elements,
-    imageSrc,
-    imgNatural.h,
-    imgNatural.w,
-    mode,
-    showImage,
-    zoom,
-  ]);
+      const deltaY = e.deltaY;
+      const newScale = fitScale * zoom;
+      const desiredY = imgOffsetRef.current.y - deltaY;
 
-  // ====== Shortcuts (단축키) ======
+      const clamped = clampOffsetForScale(
+        imgOffsetRef.current.x,
+        desiredY,
+        newScale,
+      );
+      setImgOffset(clamped);
+    },
+    [clampOffsetForScale, displayedH, fitScale, imageLoaded, imageSrc, zoom],
+  );
+
+  // ====== Shortcuts ======
   const keyGuardRef = useRef({ undo: false, redo: false });
-
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.code === "Space") spacePressedRef.current = true;
@@ -1178,7 +955,7 @@ export default function SchoolSetting() {
             let nx = p.x + dx;
             let ny = p.y + dy;
 
-            if (p.type === "문" || p.type === "비상구") {
+            if (p.type === "문" || p.type === "비콘") {
               nx = clamp(nx, 0, imgNatural.w);
               ny = clamp(ny, 0, imgNatural.h);
               return { ...p, x: nx, y: ny };
@@ -1210,14 +987,6 @@ export default function SchoolSetting() {
       if (e.repeat) return;
 
       if (e.key === "z" || e.key === "Z") {
-        const isOutlineMode = modeRef.current === "건물윤곽";
-        if (isOutlineMode && outlineRawPointsRef.current.length > 0) {
-          e.preventDefault();
-          setOutlineRawPoints((prev) => prev.slice(0, -1));
-          setOutlinePoints((prev) => prev.slice(0, -1));
-          return;
-        }
-
         if (keyGuardRef.current.undo) return;
         keyGuardRef.current.undo = true;
         e.preventDefault();
@@ -1239,69 +1008,19 @@ export default function SchoolSetting() {
         return;
       }
 
-      const idsNow = selectedIdsRef.current;
-      const selectedElements = elements.filter((p) => idsNow.includes(p.id));
-
-      if (e.key === "x" || e.key === "X") {
-        if (!selectedElements.length) return;
-        e.preventDefault();
-        pushUndoSnapshot();
-        setElements((prev) => prev.filter((p) => !idsNow.includes(p.id)));
-        setClipboard(JSON.parse(JSON.stringify(selectedElements)));
-        setSelectedId(null);
-        setSelectedIds([]);
-        setEditingResizeId(null);
-        return;
-      }
-
-      if (e.key === "c" || e.key === "C") {
-        if (!selectedElements.length) return;
-        e.preventDefault();
-        setClipboard(JSON.parse(JSON.stringify(selectedElements)));
-        return;
-      }
-
-      if (e.key === "v" || e.key === "V") {
-        const data = clipboardRef.current;
-        if (!data || !Array.isArray(data) || !data.length) return;
-
-        e.preventDefault();
-        pushUndoSnapshot();
-
-        const now = Date.now();
-        const copies = data.map((el, idx) => ({
-          ...el,
-          id: `${now}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
-          floor: currentFloorIndex,
-          x: typeof el.x === "number" ? el.x + 5 : el.x,
-          y: typeof el.y === "number" ? el.y + 5 : el.y,
-        }));
-
-        setElements((prev) => [...prev, ...copies]);
-
-        const newIds = copies.map((c) => c.id);
-        setSelectedIds(newIds);
-        setSelectedId(newIds[newIds.length - 1]);
-        return;
-      }
-
       if (e.key === "0") {
         e.preventDefault();
         if (!imageSrc || !imageLoaded) return;
         setZoom(1);
         setImgOffset({ x: 0, y: 0 });
-        return;
       }
-
       if (e.key === "=" || e.key === "+") {
         e.preventDefault();
         zoomIn();
-        return;
       }
       if (e.key === "-" || e.key === "_") {
         e.preventDefault();
         zoomOut();
-        return;
       }
     };
 
@@ -1318,19 +1037,19 @@ export default function SchoolSetting() {
       window.removeEventListener("keyup", onKeyUp);
     };
   }, [
+    clamp,
     currentFloorIndex,
     elements,
-    imgNatural.h,
-    imgNatural.w,
     imageLoaded,
     imageSrc,
+    imgNatural.h,
+    imgNatural.w,
     performRedoOnce,
     performUndoOnce,
     pushUndoSnapshot,
     setElements,
     zoomIn,
     zoomOut,
-    clamp,
   ]);
 
   // ESC
@@ -1359,17 +1078,15 @@ export default function SchoolSetting() {
       setIsDrawing(false);
       setDrawStart(null);
 
-      // 모달 열려있으면 ESC로 닫기
       setIsPlanModalOpen(false);
+      setIsSavePlanModalOpen(false);
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
   }, []);
 
-  // ====== Mouse interactions ======
+  // ====== Dragging elements ======
   const [dragging, setDragging] = useState(null);
-  // dragging = { type: "elements", startNat, ids, origPositions }
-
   const startElementsDrag = useCallback(
     (ids, startNat) => {
       if (!ids?.length) return;
@@ -1382,6 +1099,7 @@ export default function SchoolSetting() {
     [elements],
   );
 
+  // ====== Mouse handlers ======
   const onViewportMouseDown = useCallback(
     (e) => {
       if (e.button === 2) return;
@@ -1469,9 +1187,7 @@ export default function SchoolSetting() {
 
       if (mode === "문" && inside) {
         pushUndoSnapshot();
-        const id = `door-${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2, 6)}`;
+        const id = `door-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const newDoor = {
           id,
           type: "문",
@@ -1487,15 +1203,13 @@ export default function SchoolSetting() {
         return;
       }
 
-      if (mode === "비상구" && inside) {
+      if (mode === "비콘" && inside) {
         pushUndoSnapshot();
-        const id = `exit-${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2, 6)}`;
+        const id = `beacon-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const size = 40;
         const newExit = {
           id,
-          type: "비상구",
+          type: "비콘",
           x: nat.x,
           y: nat.y,
           width: size,
@@ -1542,7 +1256,6 @@ export default function SchoolSetting() {
         setIsDrawing(true);
         setDrawStart(mode === "제한 구역" ? natClamped : nat);
         setPreview(null);
-        return;
       }
     },
     [
@@ -1591,8 +1304,8 @@ export default function SchoolSetting() {
           setHover({ kind: "box", id: hitForHover.el.id });
         else if (hitForHover.kind === "door")
           setHover({ kind: "door", id: hitForHover.el.id });
-        else if (hitForHover.kind === "exit")
-          setHover({ kind: "exit", id: hitForHover.el.id });
+        else if (hitForHover.kind === "beacon")
+          setHover({ kind: "beacon", id: hitForHover.el.id });
       } else {
         setHover(null);
       }
@@ -1624,42 +1337,6 @@ export default function SchoolSetting() {
         return;
       }
 
-      if (resizing) {
-        const { id, handle, startNat, orig } = resizing;
-        const dx = nat.x - startNat.x;
-        const dy = nat.y - startNat.y;
-
-        let nx = orig.x;
-        let ny = orig.y;
-        let nw = orig.width;
-        let nh = orig.height;
-
-        if (handle.includes("n")) {
-          ny = orig.y + dy;
-          nh = orig.height - dy;
-        }
-        if (handle.includes("s")) nh = orig.height + dy;
-        if (handle.includes("w")) {
-          nx = orig.x + dx;
-          nw = orig.width - dx;
-        }
-        if (handle.includes("e")) nw = orig.width + dx;
-
-        const minSize = 5 / displayedScale;
-        if (nw < minSize) nw = minSize;
-        if (nh < minSize) nh = minSize;
-
-        nx = clamp(nx, 0, imgNatural.w - nw);
-        ny = clamp(ny, 0, imgNatural.h - nh);
-
-        setElements((prev) =>
-          prev.map((p) =>
-            p.id === id ? { ...p, x: nx, y: ny, width: nw, height: nh } : p,
-          ),
-        );
-        return;
-      }
-
       if (rotatingDoorId) {
         setElements((prev) =>
           prev.map((p) => {
@@ -1686,7 +1363,7 @@ export default function SchoolSetting() {
             const orig = dragging.origPositions[p.id];
             if (!orig) return p;
 
-            if (p.type === "문" || p.type === "비상구") {
+            if (p.type === "문" || p.type === "비콘") {
               const nx = clamp(orig.x + dx, 0, imgNatural.w);
               const ny = clamp(orig.y + dy, 0, imgNatural.h);
               return { ...p, x: nx, y: ny };
@@ -1713,24 +1390,20 @@ export default function SchoolSetting() {
               }
             : nat;
 
-        let rectNat = {
+        const rectNat = {
           x: Math.max(0, Math.min(drawStart.x, natNow.x)),
           y: Math.max(0, Math.min(drawStart.y, natNow.y)),
           width: Math.min(imgNatural.w, Math.abs(natNow.x - drawStart.x)),
           height: Math.min(imgNatural.h, Math.abs(natNow.y - drawStart.y)),
         };
 
-        if (mode === "방") rectNat = clampRoomToBuildingBox(rectNat);
         setPreview(rectNat);
-        return;
       }
     },
     [
       clamp,
       clampOffsetForScale,
-      clampRoomToBuildingBox,
       clientToNatural,
-      displayedScale,
       dragging,
       drawStart,
       fitScale,
@@ -1744,7 +1417,6 @@ export default function SchoolSetting() {
       isInsideImageNatural,
       isPanning,
       mode,
-      resizing,
       rotatingDoorId,
       zoom,
       currentFloorIndex,
@@ -1783,7 +1455,7 @@ export default function SchoolSetting() {
         if (el.type === "문") {
           if (el.x >= minX && el.x <= maxX && el.y >= minY && el.y <= maxY)
             ids.push(el.id);
-        } else if (el.type === "비상구") {
+        } else if (el.type === "비콘") {
           const w = el.width || 30;
           const h = el.height || 30;
           const cx = el.x,
@@ -1811,8 +1483,6 @@ export default function SchoolSetting() {
       setSelectionRect(null);
     }
 
-    if (resizing) setResizing(null);
-
     if (isDrawing && preview) {
       if (mode === "방") {
         const name = window.prompt("이 방의 이름을 입력하세요:", "");
@@ -1824,16 +1494,12 @@ export default function SchoolSetting() {
           return;
         }
 
-        const id = `room-${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2, 6)}`;
+        const id = `room-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         pushUndoSnapshot();
-        const rectNat = clampRoomToBuildingBox(preview);
-
         const newBox = {
           id,
           type: "방",
-          ...rectNat,
+          ...preview,
           name,
           floor: currentFloorIndex,
         };
@@ -1841,9 +1507,7 @@ export default function SchoolSetting() {
         setSelectedId(id);
         setSelectedIds([id]);
       } else {
-        const id = `box-${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2, 6)}`;
+        const id = `box-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         pushUndoSnapshot();
         const newBox = { id, type: mode, ...preview, floor: currentFloorIndex };
         setElements((prev) => [...prev, newBox]);
@@ -1857,7 +1521,6 @@ export default function SchoolSetting() {
     setPreview(null);
     setDragging(null);
   }, [
-    clampRoomToBuildingBox,
     clientToNatural,
     currentFloorIndex,
     elements,
@@ -1868,7 +1531,6 @@ export default function SchoolSetting() {
     pendingDoorId,
     preview,
     pushUndoSnapshot,
-    resizing,
     selectionRect,
     setElements,
   ]);
@@ -1883,13 +1545,6 @@ export default function SchoolSetting() {
 
       if (!hit) {
         const opts = [
-          {
-            label: "방 자동 보정(윤곽 바운딩 박스/겹침 정리)",
-            action: () => {
-              autoAdjustRooms();
-              setContextMenu(null);
-            },
-          },
           {
             label: "Undo (되돌리기)",
             action: () => {
@@ -1969,80 +1624,6 @@ export default function SchoolSetting() {
         });
       }
 
-      if (hit.el.type === "제한 구역") {
-        opts.push({
-          label: "형태 수정(리사이즈)",
-          action: () => {
-            setMode(null);
-            setEditingResizeId(hit.el.id);
-            setContextMenu(null);
-          },
-        });
-      }
-
-      if (["방", "재난 구역", "안전 구역"].includes(hit.el.type)) {
-        opts.push(
-          {
-            label: "방(파란색)으로 변경",
-            action: () => {
-              pushUndoSnapshot();
-              setElements((prev) =>
-                prev.map((p) =>
-                  p.id === hit.el.id ? { ...p, type: "방" } : p,
-                ),
-              );
-              setContextMenu(null);
-            },
-          },
-          {
-            label: "재난 구역(빨간색)으로 변경",
-            action: () => {
-              pushUndoSnapshot();
-              setElements((prev) =>
-                prev.map((p) =>
-                  p.id === hit.el.id ? { ...p, type: "재난 구역" } : p,
-                ),
-              );
-              setContextMenu(null);
-            },
-          },
-          {
-            label: "안전 구역(초록색)으로 변경",
-            action: () => {
-              pushUndoSnapshot();
-              setElements((prev) =>
-                prev.map((p) =>
-                  p.id === hit.el.id ? { ...p, type: "안전 구역" } : p,
-                ),
-              );
-              setContextMenu(null);
-            },
-          },
-          {
-            label: "방 이름 수정",
-            action: () => {
-              const curr = hit.el.name || "";
-              const name = window.prompt("새 방 이름을 입력하세요", curr);
-              if (name !== null) {
-                pushUndoSnapshot();
-                setElements((prev) =>
-                  prev.map((p) => (p.id === hit.el.id ? { ...p, name } : p)),
-                );
-              }
-              setContextMenu(null);
-            },
-          },
-          {
-            label: "형태 수정(리사이즈)",
-            action: () => {
-              setMode(null);
-              setEditingResizeId(hit.el.id);
-              setContextMenu(null);
-            },
-          },
-        );
-      }
-
       if (hit.el.type === "문") {
         opts.push(
           {
@@ -2050,10 +1631,11 @@ export default function SchoolSetting() {
             action: () => {
               pushUndoSnapshot();
               setElements((prev) =>
-                prev.map((p) => {
-                  if (p.id !== hit.el.id) return p;
-                  return { ...p, angle: ((p.angle || 0) + 180) % 360 };
-                }),
+                prev.map((p) =>
+                  p.id !== hit.el.id
+                    ? p
+                    : { ...p, angle: ((p.angle || 0) + 180) % 360 },
+                ),
               );
               setContextMenu(null);
             },
@@ -2072,17 +1654,16 @@ export default function SchoolSetting() {
       setContextMenu({ x: e.clientX, y: e.clientY, flipY, options: opts });
     },
     [
-      autoAdjustRooms,
       clientToNatural,
+      currentFloorIndex,
+      hitTestElement,
       imageLoaded,
       imageSrc,
       isInsideImageNatural,
-      hitTestElement,
       performRedoOnce,
       performUndoOnce,
       pushUndoSnapshot,
       setElements,
-      currentFloorIndex,
     ],
   );
 
@@ -2176,7 +1757,7 @@ export default function SchoolSetting() {
     ));
   }
 
-  // ====== UI classes ======
+  // ====== Buttons ======
   const btnSub =
     "px-4 py-2 bg-[#66BB6A] text-white rounded-lg shadow hover:bg-[#2E7D32] disabled:opacity-60";
   const btnGray =
@@ -2249,14 +1830,6 @@ export default function SchoolSetting() {
               <button onClick={() => setShowHelp((p) => !p)} className={btnSub}>
                 {showHelp ? "사용 방법 닫기" : "사용 방법"}
               </button>
-
-              <button
-                onClick={autoAdjustRooms}
-                className={btnSub}
-                disabled={!imageSrc}
-              >
-                방 자동 보정
-              </button>
             </div>
 
             {/* 층 이동/이름 */}
@@ -2289,8 +1862,7 @@ export default function SchoolSetting() {
           </div>
 
           {/* 모드 버튼 */}
-          <div className="flex flex-wrap gap-2 items-center">
-            {/* 자동 분석 컨트롤 */}
+          <div className="flex flex-wrap gap-2 items-center justify-between">
             {autoAnalyzing ? (
               <div className="flex items-center gap-2">
                 <div className="text-sm font-semibold text-gray-700">
@@ -2299,7 +1871,6 @@ export default function SchoolSetting() {
                 <button
                   onClick={() => {
                     analyzeRunIdRef.current += 1;
-
                     setFloors((prev) => {
                       const next = [...prev];
                       const idx = currentFloorIndexRef.current;
@@ -2315,53 +1886,6 @@ export default function SchoolSetting() {
                   자동 분석 멈추기
                 </button>
               </div>
-            ) : currentFloor.hasAutoAnalysisResult &&
-              !currentFloor.autoAnalysisHidden ? (
-              <button
-                onClick={() => {
-                  setFloors((prev) => {
-                    const next = [...prev];
-                    const curr = next[currentFloorIndex];
-                    if (!curr) return prev;
-
-                    next[currentFloorIndex] = {
-                      ...curr,
-                      elements: [],
-                      autoAnalysisHidden: true,
-                    };
-                    return next;
-                  });
-
-                  setSelectedId(null);
-                  setSelectedIds([]);
-                  setEditingResizeId(null);
-                  setContextMenu(null);
-                }}
-                className={btnSub}
-              >
-                이미지 자동 분석 끄기
-              </button>
-            ) : currentFloor.hasAutoAnalysisResult &&
-              currentFloor.autoAnalysisHidden ? (
-              <button
-                onClick={() => {
-                  setFloors((prev) => {
-                    const next = [...prev];
-                    const curr = next[currentFloorIndex];
-                    if (!curr) return prev;
-
-                    next[currentFloorIndex] = {
-                      ...curr,
-                      elements: curr.autoElementsCache || [],
-                      autoAnalysisHidden: false,
-                    };
-                    return next;
-                  });
-                }}
-                className={btnSub}
-              >
-                자동 분석 다시 가져오기
-              </button>
             ) : (
               <button
                 onClick={() => {
@@ -2400,16 +1924,14 @@ export default function SchoolSetting() {
                   setContextMenu(null);
                   setEditingResizeId(null);
                 }}
-                className={`px-3 py-2 rounded-full border text-sm ${
-                  mode === m ? chipActive : chipIdle
-                }`}
+                className={`px-3 py-2 rounded-full border text-sm ${mode === m ? chipActive : chipIdle}`}
                 disabled={!imageSrc}
               >
                 {m}
               </button>
             ))}
 
-            <div className="ml-auto flex items-center gap-2 text-sm">
+            <div className="flex items-center gap-2 text-sm ml-auto shrink-0">
               <button
                 onClick={zoomOut}
                 className="px-3 py-2 border rounded bg-white"
@@ -2438,18 +1960,13 @@ export default function SchoolSetting() {
                 리셋
               </button>
               <button
-                onClick={handleSaveJSON}
+                onClick={() => {
+                  if (!imageSrc) return;
+                  setSavePlanName("");
+                  setIsSavePlanModalOpen(true);
+                }}
                 disabled={!imageSrc}
-                className="
-                  px-4 py-2
-                  rounded
-                  bg-[#2E7D32]
-                  text-white
-                  font-bold
-                  shadow
-                  hover:bg-[#256428]
-                  disabled:opacity-60
-                "
+                className="px-4 py-2 rounded bg-[#2E7D32] text-white font-bold shadow hover:bg-[#256428] disabled:opacity-60"
               >
                 저장
               </button>
@@ -2458,81 +1975,22 @@ export default function SchoolSetting() {
 
           {/* 도움말 */}
           {showHelp && (
-            <div className="p-4 rounded border bg-[#FAFAFA] text-sm text-gray-800 space-y-3">
-              <div className="font-bold text-[#2E7D32]">
-                사용 방법(핵심 조작)
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="p-3 bg-white border rounded">
-                  <div className="font-semibold mb-2">마우스 조작</div>
-                  <ul className="list-disc pl-5 space-y-1">
-                    <li>
-                      <b>선택 모드</b>(도구 선택 안함): 요소 클릭=선택,{" "}
-                      <b>Ctrl+클릭</b>=다중 선택
-                    </li>
-                    <li>빈 공간 드래그=박스 선택(여러 요소 선택)</li>
-                    <li>
-                      <b>Space 누른 채 드래그</b>=패닝(이미지 이동)
-                    </li>
-                    <li>
-                      우클릭=컨텍스트 메뉴(삭제/타입변경/리사이즈/문 회전 등)
-                    </li>
-                    <li>
-                      문은 <b>문 모드</b>에서 클릭으로 생성 후, 마우스로 각도
-                      조절(45° 스냅)
-                    </li>
-                    <li>
-                      윤곽은 <b>건물윤곽 모드</b>에서 점을 찍고, 시작점 근처
-                      클릭하면 닫힘
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="p-3 bg-white border rounded">
-                  <div className="font-semibold mb-2">단축키</div>
-                  <ul className="list-disc pl-5 space-y-1">
-                    <li>
-                      <b>Ctrl+Z</b>: Undo (윤곽 그리기 중이면 점 1개 취소)
-                    </li>
-                    <li>
-                      <b>Ctrl+Y</b>: Redo
-                    </li>
-                    <li>
-                      <b>Delete / Backspace</b>: 선택 요소 삭제
-                    </li>
-                    <li>
-                      <b>Ctrl+C / Ctrl+X / Ctrl+V</b>: 복사 / 잘라내기 /
-                      붙여넣기
-                    </li>
-                    <li>
-                      <b>방향키</b>: 선택 요소 1px 이동
-                    </li>
-                    <li>
-                      <b>Ctrl + 마우스 휠</b>: 줌 인/아웃(커서 기준)
-                    </li>
-                    <li>
-                      <b>일반 휠</b>: 세로 스크롤(이미지가 세로로 넘칠 때)
-                    </li>
-                    <li>
-                      <b>Ctrl+0</b>: 줌/오프셋 리셋
-                    </li>
-                    <li>
-                      <b>ESC</b>: 현재 모드/드래그/리사이즈/회전/프리뷰 취소
-                    </li>
-                  </ul>
-                </div>
-              </div>
-
-              <div className="text-xs text-gray-600">
-                팁) 리사이즈는 요소를 우클릭 → “형태 수정(리사이즈)”를 누르면
-                핸들이 나타납니다.
-              </div>
+            <div className="p-4 rounded border bg-[#FAFAFA] text-sm text-gray-800 space-y-2">
+              <div className="font-bold text-[#2E7D32]">사용 방법(핵심)</div>
+              <ul className="list-disc pl-5 space-y-1">
+                <li>
+                  선택 모드(도구 선택 안함): 클릭=선택, Ctrl+클릭=다중 선택
+                </li>
+                <li>빈 공간 드래그=박스 선택</li>
+                <li>Space 누른 채 드래그=패닝</li>
+                <li>Ctrl+휠=줌</li>
+                <li>우클릭=삭제/문 회전 등</li>
+              </ul>
             </div>
           )}
         </div>
 
-        {/* ✅ 편집 영역: 뷰포트(왼쪽) + 상태 패널(오른쪽) */}
+        {/* 편집 영역 */}
         <div className="flex gap-4 items-start mt-4">
           {/* 뷰포트 */}
           <div
@@ -2617,9 +2075,7 @@ export default function SchoolSetting() {
                     el.points
                       .map(
                         (p, i) =>
-                          `${i === 0 ? "M" : "L"} ${p.x * displayedScale} ${
-                            p.y * displayedScale
-                          }`,
+                          `${i === 0 ? "M" : "L"} ${p.x * displayedScale} ${p.y * displayedScale}`,
                       )
                       .join(" ") + " Z";
                   return (
@@ -2706,10 +2162,7 @@ export default function SchoolSetting() {
                   const doorW = 28 * displayedScale;
                   const doorH = 10 * displayedScale;
 
-                  const transform = `translate(${dispX - doorW / 2}px, ${
-                    dispY - doorH / 2
-                  }px) rotate(${el.angle || 0}deg)`;
-
+                  const transform = `translate(${dispX - doorW / 2}px, ${dispY - doorH / 2}px) rotate(${el.angle || 0}deg)`;
                   const isRotating = rotatingDoorId === el.id;
                   const isHoverDoor =
                     hover && hover.kind === "door" && hover.id === el.id;
@@ -2729,37 +2182,6 @@ export default function SchoolSetting() {
                       }}
                     >
                       <div
-                        onMouseDown={(ev) => {
-                          if (ev.button === 2) return;
-                          if (mode === null) {
-                            ev.stopPropagation();
-                            const nat = clientToNatural(ev.clientX, ev.clientY);
-
-                            const elId = el.id;
-                            const current = selectedIds.length
-                              ? selectedIds
-                              : selectedIdsRef.current;
-
-                            let newSelectedIds;
-                            if (ev.ctrlKey) {
-                              newSelectedIds = current.includes(elId)
-                                ? current.filter((id) => id !== elId)
-                                : [...current, elId];
-                            } else {
-                              newSelectedIds = [elId];
-                            }
-
-                            setSelectedIds(newSelectedIds);
-                            setSelectedId(
-                              newSelectedIds[newSelectedIds.length - 1],
-                            );
-                            setContextMenu(null);
-                            setEditingResizeId(null);
-
-                            pushUndoSnapshot();
-                            startElementsDrag(newSelectedIds, nat);
-                          }
-                        }}
                         style={{
                           position: "absolute",
                           transformOrigin: "center",
@@ -2801,75 +2223,37 @@ export default function SchoolSetting() {
                   );
                 }
 
-                if (el.type === "비상구") {
+                if (el.type === "비콘") {
                   const dispX = natToDispX(el.x);
                   const dispY = natToDispY(el.y);
-                  const sizeW = (el.width || 40) * displayedScale;
-                  const sizeH = (el.height || 40) * displayedScale;
+                  const size = (el.width || 24) * displayedScale;
 
-                  const isSelectedExit = selectedIds.includes(el.id);
-                  const isHoverExit =
-                    hover && hover.kind === "exit" && hover.id === el.id;
+                  const isSelected = selectedIds.includes(el.id);
+                  const isHoverB =
+                    hover && hover.kind === "beacon" && hover.id === el.id;
 
                   return (
                     <div
                       key={el.id}
-                      onMouseDown={(ev) => {
-                        if (ev.button === 2) return;
-                        if (mode === null) {
-                          ev.stopPropagation();
-                          const nat = clientToNatural(ev.clientX, ev.clientY);
-                          pushUndoSnapshot();
-
-                          const elId = el.id;
-                          const current = selectedIds.length
-                            ? selectedIds
-                            : selectedIdsRef.current;
-
-                          let newSelectedIds;
-                          if (ev.ctrlKey) {
-                            newSelectedIds = current.includes(elId)
-                              ? current.filter((id) => id !== elId)
-                              : [...current, elId];
-                          } else {
-                            newSelectedIds = [elId];
-                          }
-
-                          setSelectedIds(newSelectedIds);
-                          setSelectedId(
-                            newSelectedIds[newSelectedIds.length - 1],
-                          );
-                          setContextMenu(null);
-                          setEditingResizeId(null);
-                          startElementsDrag(newSelectedIds, nat);
-                        }
-                      }}
                       style={{
                         position: "absolute",
-                        left: dispX - sizeW / 2,
-                        top: dispY - sizeH / 2,
-                        width: sizeW,
-                        height: sizeH,
-                        backgroundColor: "#0f9d58",
-                        border: isSelectedExit
+                        left: dispX - size / 2,
+                        top: dispY - size / 2,
+                        width: size,
+                        height: size,
+                        borderRadius: "50%",
+                        background:
+                          "radial-gradient(circle at 30% 30%, #ffffff 0%, #f2f2f2 55%, #d9d9d9 100%)",
+                        border: isSelected
                           ? "3px solid #0b74de"
-                          : isHoverExit
+                          : isHoverB
                             ? "2px dashed #ff8800"
-                            : "2px solid #0b5c2f",
-                        borderRadius: 4,
-                        boxSizing: "border-box",
-                        zIndex: isSelectedExit ? 42 : 32,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "white",
-                        fontSize: 10,
-                        fontWeight: "bold",
+                            : "1px solid rgba(0,0,0,0.18)",
+                        boxShadow: "0 6px 14px rgba(0,0,0,0.18)",
                         pointerEvents: "auto",
+                        zIndex: 32,
                       }}
-                    >
-                      EXIT
-                    </div>
+                    />
                   );
                 }
 
@@ -2878,42 +2262,13 @@ export default function SchoolSetting() {
                 const isHoverBox =
                   hover && hover.kind === "box" && hover.id === el.id;
                 const isSelectedBox = selectedIds.includes(el.id);
+
                 const boxW = Math.max(1, natToDispW(el.width));
                 const boxH = Math.max(1, natToDispH(el.height));
 
                 return (
                   <div
                     key={el.id}
-                    onMouseDown={(ev) => {
-                      if (ev.button === 2) return;
-                      if (mode === null) {
-                        ev.stopPropagation();
-                        const nat = clientToNatural(ev.clientX, ev.clientY);
-                        pushUndoSnapshot();
-
-                        const elId = el.id;
-                        const current = selectedIds.length
-                          ? selectedIds
-                          : selectedIdsRef.current;
-
-                        let newSelectedIds;
-                        if (ev.ctrlKey) {
-                          newSelectedIds = current.includes(elId)
-                            ? current.filter((id) => id !== elId)
-                            : [...current, elId];
-                        } else {
-                          newSelectedIds = [elId];
-                        }
-
-                        setSelectedIds(newSelectedIds);
-                        setSelectedId(
-                          newSelectedIds[newSelectedIds.length - 1],
-                        );
-                        setContextMenu(null);
-                        setEditingResizeId(null);
-                        startElementsDrag(newSelectedIds, nat);
-                      }
-                    }}
                     style={{
                       position: "absolute",
                       left: natToDispX(el.x),
@@ -2946,13 +2301,12 @@ export default function SchoolSetting() {
                         {el.name}
                       </div>
                     )}
-
                     {renderResizeHandles(el)}
                   </div>
                 );
               })}
 
-            {/* 박스 생성 미리보기 */}
+            {/* 미리보기 */}
             {preview && (
               <div
                 style={{
@@ -2969,7 +2323,7 @@ export default function SchoolSetting() {
               />
             )}
 
-            {/* 드래그 박스(박스 선택) */}
+            {/* 박스 선택 */}
             {selectionRect && (
               <div
                 style={{
@@ -2987,7 +2341,7 @@ export default function SchoolSetting() {
             )}
           </div>
 
-          {/* 오른쪽 상태/안내 패널 */}
+          {/* 오른쪽 패널 */}
           <div className="w-[320px] shrink-0">
             <div className="bg-white border shadow rounded p-4 space-y-2 sticky top-32">
               <div className="text-sm text-gray-700">
@@ -3000,10 +2354,9 @@ export default function SchoolSetting() {
               <div className="text-sm text-gray-700">
                 <b>팁:</b> Space+드래그로 패닝, Ctrl+휠로 줌
               </div>
-
               <div className="pt-2 border-t text-xs text-gray-500 space-y-1">
-                <div>• 우클릭: 삭제/타입변경/리사이즈/문 회전</div>
-                <div>• ESC: 모드/드래그/리사이즈/회전 취소</div>
+                <div>• 우클릭: 삭제/문 회전</div>
+                <div>• ESC: 모드/드래그/회전 취소</div>
               </div>
             </div>
           </div>
@@ -3056,7 +2409,7 @@ export default function SchoolSetting() {
         )}
       </div>
 
-      {/* ✅ 구조도 목록 팝업 (중복 제거 + X 닫기) */}
+      {/* ✅ 구조도 목록 모달 (저장 모달과 완전 분리) */}
       {isPlanModalOpen && (
         <div
           className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center"
@@ -3089,19 +2442,28 @@ export default function SchoolSetting() {
 
                 {savedPlans.map((plan) => {
                   const active = plan.id === selectedPlanId;
-                  const count = plan.payload?.elements?.length ?? 0;
+
+                  // payload가 { floors }면 해당 floor, 아니면 { elements } 구버전도 대응
+                  const floorData = Array.isArray(plan?.payload?.floors)
+                    ? plan.payload.floors[
+                        Math.min(planFloorIdx, plan.payload.floors.length - 1)
+                      ]
+                    : plan?.payload;
+
+                  const els = floorData?.elements || [];
 
                   return (
                     <button
                       key={plan.id}
-                      onClick={() => setSelectedPlanId(plan.id)}
-                      className={`w-full text-left p-3 mb-2 border rounded hover:bg-gray-50 ${
-                        active ? "bg-gray-50 border-gray-400" : ""
-                      }`}
+                      onClick={() => {
+                        setSelectedPlanId(plan.id);
+                        setPlanFloorIdx(0);
+                      }}
+                      className={`w-full text-left p-3 mb-2 border rounded hover:bg-gray-50 ${active ? "bg-gray-50 border-gray-400" : ""}`}
                     >
                       <div className="font-semibold">{plan.name}</div>
                       <div className="text-xs text-gray-500">
-                        elements: {count}
+                        elements: {els.length}
                       </div>
                     </button>
                   );
@@ -3116,46 +2478,232 @@ export default function SchoolSetting() {
                   </div>
                 ) : (
                   <>
-                    {(() => {
-                      // ✅ 임시 테스트 기본 이미지: /img/1층.png
-                      const raw =
-                        selectedPlan.payload?.imagePath ||
-                        selectedPlan.payload?.image?.src ||
-                        "/img/1층.png";
+                    {/* 층 탭 (floors 있는 경우만) */}
+                    {Array.isArray(selectedPlan?.payload?.floors) &&
+                      selectedPlan.payload.floors.length > 0 && (
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="text-sm text-gray-700 font-medium">
+                            층 선택
+                          </div>
+                          <select
+                            value={planFloorIdx}
+                            onChange={(e) =>
+                              setPlanFloorIdx(Number(e.target.value))
+                            }
+                            className="border rounded px-2 py-1 text-sm bg-white"
+                          >
+                            {selectedPlan.payload.floors.map((f, idx) => (
+                              <option key={idx} value={idx}>
+                                {f.name || `${idx + 1}층`}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
 
-                      const imgPath =
-                        typeof raw === "string" && raw.startsWith("blob:")
-                          ? "/img/1층.png"
-                          : raw;
+                    {/* ✅ 미리보기: width 100% + 저장 좌표 그대로 (viewBox) */}
+                    {(() => {
+                      const floorData = Array.isArray(
+                        selectedPlan?.payload?.floors,
+                      )
+                        ? selectedPlan.payload.floors[planFloorIdx]
+                        : selectedPlan?.payload;
+
+                      const els = floorData?.elements || [];
+
+                      const src = toPublicImg(
+                        floorData?.image?.src ||
+                          floorData?.imageSrc ||
+                          floorData?.imagePath ||
+                          "1층.png",
+                      );
+
+                      const natW =
+                        floorData?.image?.natural?.w ||
+                        floorData?.imgNatural?.w ||
+                        floorData?.natural?.w ||
+                        1000;
+
+                      const natH =
+                        floorData?.image?.natural?.h ||
+                        floorData?.imgNatural?.h ||
+                        floorData?.natural?.h ||
+                        600;
+
+                      const previewTypeColor = (type, alpha = 0.25) => {
+                        switch (type) {
+                          case "제한 구역":
+                            return `rgba(255,165,0,${alpha})`;
+                          case "재난 구역":
+                            return `rgba(255,0,0,${alpha})`;
+                          case "안전 구역":
+                            return `rgba(0,200,0,${alpha})`;
+                          case "방":
+                            return `rgba(0,112,255,${alpha})`;
+                          default:
+                            return `rgba(0,0,0,0)`;
+                        }
+                      };
 
                       return (
                         <div className="mb-3">
-                          <img
-                            src={imgPath}
-                            alt="plan preview"
+                          <svg
+                            viewBox={`0 0 ${natW} ${natH}`}
+                            preserveAspectRatio="xMinYMin meet"
                             style={{
                               width: "100%",
-                              maxHeight: 260,
-                              objectFit: "contain",
+                              height: "auto",
+                              display: "block",
                               border: "1px solid #eee",
                               borderRadius: 6,
                               background: "#fafafa",
                             }}
-                            onError={(e) => {
-                              e.currentTarget.style.display = "none";
-                            }}
-                          />
+                          >
+                            {/* 배경 이미지 */}
+                            <image
+                              href={src}
+                              x="0"
+                              y="0"
+                              width={natW}
+                              height={natH}
+                            />
+
+                            {/* 건물윤곽 */}
+                            {els
+                              .filter(
+                                (el) =>
+                                  el.type === "건물윤곽" &&
+                                  el.points?.length >= 3,
+                              )
+                              .map((el) => {
+                                const d =
+                                  el.points
+                                    .map(
+                                      (p, i) =>
+                                        `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`,
+                                    )
+                                    .join(" ") + " Z";
+                                return (
+                                  <path
+                                    key={el.id || Math.random()}
+                                    d={d}
+                                    fill="rgba(0,0,0,0.04)"
+                                    stroke="rgba(0,0,0,0.55)"
+                                    strokeWidth="2"
+                                  />
+                                );
+                              })}
+
+                            {/* 방/구역 */}
+                            {els
+                              .filter((el) =>
+                                [
+                                  "방",
+                                  "제한 구역",
+                                  "재난 구역",
+                                  "안전 구역",
+                                ].includes(el.type),
+                              )
+                              .map((el) => (
+                                <g key={el.id || Math.random()}>
+                                  <rect
+                                    x={el.x || 0}
+                                    y={el.y || 0}
+                                    width={el.width || 0}
+                                    height={el.height || 0}
+                                    fill={previewTypeColor(el.type, 0.22)}
+                                    stroke="rgba(0,0,0,0.45)"
+                                    strokeWidth="2"
+                                  />
+                                  {el.name ? (
+                                    <g>
+                                      <rect
+                                        x={(el.x || 0) + 4}
+                                        y={(el.y || 0) + 4}
+                                        width={Math.min(
+                                          130,
+                                          Math.max(40, (el.width || 0) - 8),
+                                        )}
+                                        height="18"
+                                        rx="4"
+                                        fill="rgba(255,255,255,0.9)"
+                                        stroke="rgba(0,0,0,0.08)"
+                                      />
+                                      <text
+                                        x={(el.x || 0) + 10}
+                                        y={(el.y || 0) + 17}
+                                        fontSize="11"
+                                        fill="#111"
+                                      >
+                                        {el.name}
+                                      </text>
+                                    </g>
+                                  ) : null}
+                                </g>
+                              ))}
+
+                            {/* 문 */}
+                            {els
+                              .filter((el) => el.type === "문")
+                              .map((el) => {
+                                const w = 28;
+                                const h = 10;
+                                const x = el.x || 0;
+                                const y = el.y || 0;
+                                const a = el.angle || 0;
+                                return (
+                                  <rect
+                                    key={el.id || Math.random()}
+                                    x={x - w / 2}
+                                    y={y - h / 2}
+                                    width={w}
+                                    height={h}
+                                    fill="rgba(60,60,60,0.95)"
+                                    stroke="rgba(0,0,0,0.4)"
+                                    strokeWidth="1"
+                                    transform={`rotate(${a} ${x} ${y})`}
+                                  />
+                                );
+                              })}
+
+                            {/* 비콘 */}
+                            {els
+                              .filter((el) => el.type === "비콘")
+                              .map((el) => {
+                                const x = el.x || 0;
+                                const y = el.y || 0;
+                                const size = el.width || 40;
+                                return (
+                                  <circle
+                                    key={el.id || Math.random()}
+                                    cx={x}
+                                    cy={y}
+                                    r={size / 2}
+                                    fill="#e6e6e6"
+                                    stroke="rgba(0,0,0,0.18)"
+                                  />
+                                );
+                              })}
+                          </svg>
                         </div>
                       );
                     })()}
 
+                    {/* 요소 요약 */}
                     {(() => {
-                      const els = selectedPlan.payload?.elements || [];
+                      const floorData = Array.isArray(
+                        selectedPlan?.payload?.floors,
+                      )
+                        ? selectedPlan.payload.floors[planFloorIdx]
+                        : selectedPlan?.payload;
+
+                      const els = floorData?.elements || [];
                       const countByType = els.reduce((acc, el) => {
                         const t = el.type || "unknown";
                         acc[t] = (acc[t] || 0) + 1;
                         return acc;
                       }, {});
+
                       return (
                         <div className="text-sm">
                           <div className="font-semibold mb-2">요소 요약</div>
@@ -3173,15 +2721,99 @@ export default function SchoolSetting() {
                       );
                     })()}
 
+                    {/* 적용 버튼 */}
                     <button
-                      onClick={() => applyPlan(selectedPlan.payload)}
-                      className="mt-4 w-full bg-[#2E7D32] text-white rounded py-2 font-bold"
+                      onClick={() => {
+                        const floorData = Array.isArray(
+                          selectedPlan?.payload?.floors,
+                        )
+                          ? selectedPlan.payload.floors[planFloorIdx]
+                          : selectedPlan?.payload;
+
+                        if (!floorData) return;
+
+                        pushUndoSnapshot();
+
+                        const fixed = (floorData.elements || []).map((el) => ({
+                          ...el,
+                          floor: currentFloorIndex,
+                        }));
+
+                        const imgPath =
+                          floorData.image?.src ||
+                          floorData.imageSrc ||
+                          floorData.imagePath ||
+                          "/img/1층.png";
+
+                        setFloors((prev) => {
+                          const next = [...prev];
+                          const curr =
+                            next[currentFloorIndex] || makeEmptyFloor();
+                          next[currentFloorIndex] = {
+                            ...curr,
+                            imageSrc: imgPath,
+                            uploadedFile: null,
+                            imgNatural: floorData.image?.natural
+                              ? floorData.image.natural
+                              : curr.imgNatural,
+                            elements: fixed,
+                          };
+                          return next;
+                        });
+
+                        setIsPlanModalOpen(false);
+                      }}
+                      className="mt-4 w-full bg-[#2E7D32] text-white rounded py-2 font-bold hover:bg-[#256428]"
                     >
                       이 구조도를 현재 층에 적용
                     </button>
                   </>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ 저장 모달 (구조도 목록 모달 바깥) */}
+      {isSavePlanModalOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center"
+          onMouseDown={() => setIsSavePlanModalOpen(false)}
+        >
+          <div
+            className="bg-white w-[520px] rounded-lg shadow p-4 relative"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-bold">구조도 저장</div>
+              <button
+                onClick={() => setIsSavePlanModalOpen(false)}
+                className="w-9 h-9 rounded hover:bg-gray-100 text-gray-700 text-xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="text-sm text-gray-700 mb-2">
+              저장할 구조도 이름을 입력하세요
+            </div>
+
+            <input
+              value={savePlanName}
+              onChange={(e) => setSavePlanName(e.target.value)}
+              className="w-full border rounded px-3 py-2"
+              placeholder="예) 제한구역 3개 구조도"
+              autoFocus
+            />
+
+            <div className="flex justify-end mt-4">
+              <button
+                className="px-6 py-2 rounded bg-[#2E7D32] text-white font-bold hover:bg-[#256428]"
+                onClick={saveCurrentPlanToList}
+              >
+                저장
+              </button>
             </div>
           </div>
         </div>

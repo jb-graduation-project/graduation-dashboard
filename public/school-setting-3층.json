@@ -1,0 +1,380 @@
+{
+  "floor": "3층",
+  "image": {
+    "src": "blob:http://localhost:3000/3d8e509d-92af-4cb2-aa30-611f7fc8b909",
+    "natural": {
+      "w": 828,
+      "h": 280
+    }
+  },
+  "elements": [
+    {
+      "id": "auto-outline",
+      "type": "건물윤곽",
+      "points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 0,
+          "y": 279
+        },
+        {
+          "x": 827,
+          "y": 279
+        },
+        {
+          "x": 827,
+          "y": 0
+        },
+        {
+          "x": 628,
+          "y": 0
+        },
+        {
+          "x": 627,
+          "y": 34
+        },
+        {
+          "x": 537,
+          "y": 34
+        },
+        {
+          "x": 536,
+          "y": 0
+        }
+      ],
+      "floor": 2
+    },
+    {
+      "id": "auto-room-5",
+      "type": "방",
+      "x": 49,
+      "y": 173,
+      "width": 74,
+      "height": 45,
+      "name": "2-1",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-8",
+      "type": "방",
+      "x": 498,
+      "y": 172,
+      "width": 75,
+      "height": 45,
+      "name": "1-7",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-10",
+      "type": "방",
+      "x": 423,
+      "y": 172,
+      "width": 74,
+      "height": 45,
+      "name": "1-8",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-11",
+      "type": "방",
+      "x": 341,
+      "y": 172,
+      "width": 80,
+      "height": 45,
+      "name": "2-4",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-12",
+      "type": "방",
+      "x": 276,
+      "y": 172,
+      "width": 64,
+      "height": 45,
+      "name": "2-3",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-13",
+      "type": "방",
+      "x": 124,
+      "y": 172,
+      "width": 75,
+      "height": 46,
+      "name": "2-2",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-18",
+      "type": "재난 구역",
+      "x": 67,
+      "y": 78,
+      "width": 150,
+      "height": 46,
+      "name": "과학실",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-20",
+      "type": "방",
+      "x": 707,
+      "y": 66,
+      "width": 73,
+      "height": 57,
+      "name": "3-3",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-22",
+      "type": "방",
+      "x": 631,
+      "y": 66,
+      "width": 74,
+      "height": 57,
+      "name": "3-2",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-24",
+      "type": "방",
+      "x": 555,
+      "y": 66,
+      "width": 75,
+      "height": 57,
+      "name": "3-1",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-26",
+      "type": "방",
+      "x": 479,
+      "y": 66,
+      "width": 75,
+      "height": 57,
+      "name": "2-8",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-28",
+      "type": "방",
+      "x": 404,
+      "y": 66,
+      "width": 74,
+      "height": 57,
+      "name": "2-7",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-30",
+      "type": "방",
+      "x": 341,
+      "y": 66,
+      "width": 61,
+      "height": 57,
+      "name": "2-6",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-31",
+      "type": "방",
+      "x": 293,
+      "y": 66,
+      "width": 47,
+      "height": 57,
+      "name": "2-5",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-32",
+      "type": "방",
+      "x": 219,
+      "y": 66,
+      "width": 74,
+      "height": 81,
+      "name": "꿈너머 꿈터",
+      "floor": 2
+    },
+    {
+      "id": "auto-room-38",
+      "type": "방",
+      "x": 10,
+      "y": 4,
+      "width": 150,
+      "height": 44,
+      "name": "STEAM 과학실",
+      "floor": 2
+    },
+    {
+      "id": "exit-1768519931256-al81",
+      "type": "비상구",
+      "x": 799,
+      "y": 31.8,
+      "width": 40,
+      "height": 40,
+      "floor": 2
+    },
+    {
+      "id": "exit-1768519937675-h38l",
+      "type": "비상구",
+      "x": 213,
+      "y": 27.8,
+      "width": 40,
+      "height": 40,
+      "floor": 2
+    },
+    {
+      "id": "exit-1768519939197-aetb",
+      "type": "비상구",
+      "x": 24,
+      "y": 184.8,
+      "width": 40,
+      "height": 40,
+      "floor": 2
+    },
+    {
+      "id": "exit-1768519943488-odhq",
+      "type": "비상구",
+      "x": 504,
+      "y": 134.8,
+      "width": 40,
+      "height": 40,
+      "floor": 2
+    },
+    {
+      "id": "door-1768519965935-tfr7",
+      "type": "문",
+      "x": 74,
+      "y": 48.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768519970706-vxr3",
+      "type": "문",
+      "x": 161,
+      "y": 76.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768519972573-tk3b",
+      "type": "문",
+      "x": 261,
+      "y": 64.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768519974890-0zqo",
+      "type": "문",
+      "x": 316,
+      "y": 64.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768519975828-9wv2",
+      "type": "문",
+      "x": 366,
+      "y": 64.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768519977388-2d6z",
+      "type": "문",
+      "x": 445,
+      "y": 65.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768519978656-3zfo",
+      "type": "문",
+      "x": 516,
+      "y": 66.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768519979578-haxa",
+      "type": "문",
+      "x": 588,
+      "y": 64.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768519980613-ad1a",
+      "type": "문",
+      "x": 668,
+      "y": 64.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768519981708-8nl4",
+      "type": "문",
+      "x": 743,
+      "y": 65.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768520002127-dp3t",
+      "type": "문",
+      "x": 84,
+      "y": 172.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768520003123-qgbu",
+      "type": "문",
+      "x": 156,
+      "y": 170.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768520004575-r7sb",
+      "type": "문",
+      "x": 305,
+      "y": 170.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768520005520-2kvp",
+      "type": "문",
+      "x": 384,
+      "y": 168.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768520006841-3lxo",
+      "type": "문",
+      "x": 454,
+      "y": 169.8,
+      "angle": 0,
+      "floor": 2
+    },
+    {
+      "id": "door-1768520008139-odis",
+      "type": "문",
+      "x": 536,
+      "y": 172.8,
+      "angle": 0,
+      "floor": 2
+    }
+  ],
+  "uiState": {
+    "mode": "문",
+    "showImage": true,
+    "zoom": 1
+  }
+}
