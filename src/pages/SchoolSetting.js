@@ -10,6 +10,12 @@ import Navbar from "../components/Navbar";
 
 const API_BASE = "http://127.0.0.1:8000";
 
+const DEFAULT_FLOOR_JSONS = [
+  { name: "1층", url: "/school-setting-1층.json", img: "/img/1층.png" },
+  { name: "2층", url: "/school-setting-2층.json", img: "/img/2층.png" },
+  { name: "3층", url: "/school-setting-3층.json", img: "/img/3층.png" },
+];
+
 export default function SchoolSetting() {
   // ====== Viewport ======
   const VIEW_W = 900;
@@ -36,12 +42,16 @@ export default function SchoolSetting() {
   const analyzeRunIdRef = useRef(0);
 
   const toPublicImg = (raw) => {
-    if (!raw || typeof raw !== "string") return "/img/1층.png";
-    const s = raw.trim();
-    const name = s.split(/[/\\]/).pop(); // 윈도우/상대경로/파일명 모두 처리
-    return name ? `/img/${name}` : "/img/1층.png";
-  };
+    const FALLBACK = "/img/1층.png";
+    if (!raw || typeof raw !== "string") return FALLBACK;
 
+    const s = raw.trim();
+    if (s.startsWith("blob:") || s.startsWith("data:")) return FALLBACK;
+
+    const name = s.split(/[/\\]/).pop(); // "2층.png" 같은 파일명만
+    const path = name ? `/img/${name}` : FALLBACK;
+    return encodeURI(path);
+  };
   const planPreviewRef = useRef(null);
   const [planPreviewW, setPlanPreviewW] = useState(0);
 
@@ -310,33 +320,66 @@ export default function SchoolSetting() {
   useEffect(() => {
     async function loadDefaultPlans() {
       try {
-        const res = await fetch("/school-setting-1층.json");
-        if (!res.ok) throw new Error(await res.text());
-        const payload = await res.json();
+        // ✅ 1/2/3층 json 각각 로드
+        const floorsPayload = await Promise.all(
+          DEFAULT_FLOOR_JSONS.map(async (f) => {
+            const res = await fetch(f.url);
+            if (!res.ok) throw new Error(await res.text());
+            const payload = await res.json();
 
-        if (
-          !payload ||
-          (!Array.isArray(payload.elements) && !Array.isArray(payload.floors))
-        ) {
-          console.warn("구조도 JSON 형식이 아님");
-          return;
-        }
+            // json 포맷이 { elements: [...] } 라고 가정
+            const elementsRaw = Array.isArray(payload?.elements)
+              ? payload.elements
+              : [];
+
+            const elements = elementsRaw.map((el) => {
+              if (el?.type !== "비상구") return el;
+
+              // 비상구가 (x,y,width,height) 사각형으로 저장되어 있었다고 가정
+              const cx = (el.x || 0) + (el.width || 0) / 2;
+              const cy = (el.y || 0) + (el.height || 0) / 2;
+
+              return {
+                ...el,
+                type: "비콘",
+                x: cx,
+                y: cy,
+                width: 16, // ← 비콘 크기(원 크기). 원하는 값으로 조절
+                height: 16,
+              };
+            });
+
+            return {
+              name: f.name,
+              // ✅ 이미지 임시 고정
+              image: {
+                src: f.img,
+                natural: payload?.image?.natural || { w: 1000, h: 600 },
+              },
+              elements,
+            };
+          }),
+        );
+
+        const id = "default-3floors";
+        const planName = "school-setting (1~3층)";
 
         setSavedPlans((prev) => {
-          const exists = prev.some((p) => p.name === "school-setting-1층.json");
+          const exists = prev.some((p) => p.id === id);
           if (exists) return prev;
-
           return [
             ...prev,
-            { id: "default-1f", name: "school-setting-1층.json", payload },
+            { id, name: planName, payload: { floors: floorsPayload } },
           ];
         });
 
-        setSelectedPlanId((prev) => prev ?? "default-1f");
+        setSelectedPlanId((prev) => prev ?? id);
+        setPlanFloorIdx(0);
       } catch (e) {
         console.error("기본 구조도 로드 실패:", e);
       }
     }
+
     loadDefaultPlans();
   }, []);
 
@@ -1206,7 +1249,7 @@ export default function SchoolSetting() {
       if (mode === "비콘" && inside) {
         pushUndoSnapshot();
         const id = `beacon-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const size = 40;
+        const size = 16;
         const newExit = {
           id,
           type: "비콘",
@@ -2416,7 +2459,7 @@ export default function SchoolSetting() {
           onMouseDown={() => setIsPlanModalOpen(false)}
         >
           <div
-            className="bg-white w-[820px] max-h-[520px] rounded-lg shadow p-4 overflow-hidden relative"
+            className="bg-white w-[1100px] max-w-[90vw] h-[85vh] rounded-lg shadow p-4 overflow-hidden relative"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-3">
@@ -2433,7 +2476,7 @@ export default function SchoolSetting() {
 
             <div className="flex gap-3">
               {/* 왼쪽: 목록 */}
-              <div className="w-[320px] border rounded p-2 overflow-auto max-h-[440px]">
+              <div className="w-[360px] border rounded p-2 overflow-auto h-[calc(85vh-80px)]">
                 {savedPlans.length === 0 && (
                   <div className="text-sm text-gray-500 p-2">
                     추가된 JSON 없음
@@ -2471,7 +2514,7 @@ export default function SchoolSetting() {
               </div>
 
               {/* 오른쪽: 미리보기 */}
-              <div className="flex-1 border rounded p-3 overflow-auto max-h-[440px]">
+              <div className="flex-1 border rounded p-3 overflow-auto h-[calc(85vh-80px)]">
                 {!selectedPlan ? (
                   <div className="text-sm text-gray-500">
                     왼쪽에서 구조도를 선택하세요
@@ -2490,7 +2533,7 @@ export default function SchoolSetting() {
                             onChange={(e) =>
                               setPlanFloorIdx(Number(e.target.value))
                             }
-                            className="border rounded px-2 py-1 text-sm bg-white"
+                            className="border-2 border-gray-500 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2E7D32]"
                           >
                             {selectedPlan.payload.floors.map((f, idx) => (
                               <option key={idx} value={idx}>
@@ -2515,7 +2558,7 @@ export default function SchoolSetting() {
                         floorData?.image?.src ||
                           floorData?.imageSrc ||
                           floorData?.imagePath ||
-                          "1층.png",
+                          "/img/1층.png",
                       );
 
                       const natW =
@@ -2740,22 +2783,24 @@ export default function SchoolSetting() {
                         }));
 
                         const imgPath =
-                          floorData.image?.src ||
-                          floorData.imageSrc ||
-                          floorData.imagePath ||
-                          "/img/1층.png";
+                          floorData?.image?.src ||
+                          floorData?.imageSrc ||
+                          floorData?.imagePath ||
+                          "1층.png";
+
+                        const publicSrc = toPublicImg(imgPath); // ✅ 항상 /img/1층.png 형태
 
                         setFloors((prev) => {
                           const next = [...prev];
                           const curr =
                             next[currentFloorIndex] || makeEmptyFloor();
+
                           next[currentFloorIndex] = {
                             ...curr,
-                            imageSrc: imgPath,
+                            imageSrc: publicSrc, // ✅ 무조건 1층 이미지
                             uploadedFile: null,
-                            imgNatural: floorData.image?.natural
-                              ? floorData.image.natural
-                              : curr.imgNatural,
+                            imgNatural:
+                              floorData?.image?.natural || curr.imgNatural, // ✅ floor별 natural 있으면 사용
                             elements: fixed,
                           };
                           return next;
