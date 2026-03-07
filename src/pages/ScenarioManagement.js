@@ -13,10 +13,10 @@ const TEAM_TYPES_BY_DISASTER = {
   화재: ["소화팀", "응급처치팀", "시민팀"],
 };
 
-// 재난 유형별 발생 설정 라벨/옵션 설정
+// 재난 유형별 발생 설정 라벨
 const OCCUR_CONFIG = {
-  지진: { locationLabel: "지진 피해 위치", intensityLabel: "지진 강도" },
-  화재: { locationLabel: "화재 발생 위치", intensityLabel: "화재 강도" },
+  지진: { locationLabel: "지진 피해 위치" },
+  화재: { locationLabel: "화재 발생 위치" },
 };
 
 function ScenarioManagement() {
@@ -51,7 +51,6 @@ function ScenarioManagement() {
   // 발생 설정 상태
   const [fireSetting, setFireSetting] = useState("자동설정");
   const [fireLocation, setFireLocation] = useState("");
-  const [fireIntensity, setFireIntensity] = useState("");
   const [trainingTime, setTrainingTime] = useState("");
 
   // 팀 설정 상태
@@ -63,15 +62,10 @@ function ScenarioManagement() {
   const [npcPosition, setNpcPosition] = useState("");
   const [npcStatus, setNpcStatus] = useState("");
 
-  // 참여자 설정
-  const [participants, setParticipants] = useState("");
-
   const [saving, setSaving] = useState(false);
 
   // 드롭다운 옵션
   const fireLocations = ["1층", "2층", "3층", "4층"];
-  const fireIntensities = ["약", "보통", "강"];
-  const trainingTimes = ["5분", "10분", "15분", "30분"];
   const npcPositions = ["입구", "복도", "계단", "출구"];
   const npcStatuses = ["정상", "이상", "대기"];
 
@@ -80,9 +74,9 @@ function ScenarioManagement() {
     "팀B",
     "팀C",
   ];
+
   const occurConfig = OCCUR_CONFIG[disasterType] || {
     locationLabel: "발생 위치",
-    intensityLabel: "강도",
   };
 
   const isAllAuto =
@@ -93,7 +87,6 @@ function ScenarioManagement() {
   useEffect(() => {
     if (isAllAuto) {
       setFireLocation("");
-      setFireIntensity("");
       setTrainingTime("");
       setNpcPosition("");
       setNpcStatus("");
@@ -115,29 +108,26 @@ function ScenarioManagement() {
     setTeamCounts((prev) => ({ ...prev, [team]: onlyNumber }));
   };
 
-  const intensityMap = { 약: 3, 보통: 5, 강: 7 };
+  const handleTrainingTimeChange = (value) => {
+    const onlyNumber = value.replace(/[^0-9]/g, "");
+    setTrainingTime(onlyNumber);
+  };
 
   const makePayload = (
-    { includeScenarioId } = { includeScenarioId: false }
+    { includeScenarioId } = { includeScenarioId: false },
   ) => {
     const scenarioType = disasterType === "화재" ? "FIRE" : "EARTHQUAKE";
     const triggerMode = fireSetting === "자동설정" ? "AUTO" : "MANUAL";
     const teamMode = teamSetting === "자동설정" ? "AUTO" : "MANUAL";
     const npcMode = npcSetting === "자동설정" ? "AUTO" : "MANUAL";
 
-    const intensity = intensityMap[fireIntensity] || 0;
-    const trainTime = trainingTime
-      ? parseInt(trainingTime.replace("분", ""), 10)
-      : 0;
+    const trainTime = trainingTime ? parseInt(trainingTime, 10) : 0;
 
     const teamAssignment = JSON.stringify(teamCounts || {});
     const npcPositionsJson = JSON.stringify({
       position: npcPosition || "",
       status: npcStatus || "",
     });
-
-    const participantCount =
-      parseInt(String(participants).replace(/[^0-9]/g, ""), 10) || 0;
 
     const base = {
       classroomId,
@@ -147,11 +137,11 @@ function ScenarioManagement() {
       teamMode,
       npcMode,
       location: fireLocation || "",
-      intensity,
+      intensity: 0,
       trainTime,
       teamAssignment,
       npcPositions: npcPositionsJson,
-      participantCount,
+      participantCount: 0,
     };
 
     if (includeScenarioId) return { ...base, scenarioId: selectedScenarioId };
@@ -164,7 +154,7 @@ function ScenarioManagement() {
         `${title} (${errOrRes.status})\n\n` +
           (typeof errOrRes.data === "string"
             ? errOrRes.data
-            : JSON.stringify(errOrRes.data, null, 2))
+            : JSON.stringify(errOrRes.data, null, 2)),
       );
       return;
     }
@@ -187,7 +177,7 @@ function ScenarioManagement() {
           headers: { ...authHeaders },
           timeout: 10000,
           validateStatus: () => true,
-        }
+        },
       );
 
       if (!(res.status >= 200 && res.status < 300)) {
@@ -210,7 +200,7 @@ function ScenarioManagement() {
   const handleCreateScenario = async () => {
     if (!classroomId) {
       alert(
-        "classroomId를 못 넘겨받았습니다. SchoolChannel에서 들어와야 합니다."
+        "classroomId를 못 넘겨받았습니다. SchoolChannel에서 들어와야 합니다.",
       );
       return;
     }
@@ -244,7 +234,7 @@ function ScenarioManagement() {
   const handleUpdateScenario = async () => {
     if (!classroomId) {
       alert(
-        "classroomId를 못 넘겨받았습니다. SchoolChannel에서 들어와야 합니다."
+        "classroomId를 못 넘겨받았습니다. SchoolChannel에서 들어와야 합니다.",
       );
       return;
     }
@@ -299,18 +289,7 @@ function ScenarioManagement() {
     setNpcSetting(s.npcMode === "MANUAL" ? "수동설정" : "자동설정");
 
     setFireLocation(s.location || "");
-
-    const invIntensity =
-      s.intensity >= 7
-        ? "강"
-        : s.intensity >= 5
-        ? "보통"
-        : s.intensity >= 3
-        ? "약"
-        : "";
-    setFireIntensity(invIntensity);
-
-    setTrainingTime(s.trainTime ? `${s.trainTime}분` : "");
+    setTrainingTime(s.trainTime ? String(s.trainTime) : "");
 
     try {
       const ta = s.teamAssignmentJson ? JSON.parse(s.teamAssignmentJson) : {};
@@ -327,8 +306,6 @@ function ScenarioManagement() {
       setNpcPosition("");
       setNpcStatus("");
     }
-
-    setParticipants(String(s.participantCount ?? 0));
   };
 
   useEffect(() => {
@@ -459,7 +436,7 @@ function ScenarioManagement() {
             <option value="수동설정">수동설정</option>
           </select>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block mb-1">{occurConfig.locationLabel}</label>
               <select
@@ -482,45 +459,20 @@ function ScenarioManagement() {
             </div>
 
             <div>
-              <label className="block mb-1">{occurConfig.intensityLabel}</label>
-              <select
-                value={fireIntensity}
-                onChange={(e) => setFireIntensity(e.target.value)}
-                disabled={fireSetting === "자동설정" || isAllAuto}
-                className={`border px-3 py-2 rounded w-full ${
-                  fireSetting === "자동설정" || isAllAuto
-                    ? "bg-gray-100 opacity-50"
-                    : ""
-                }`}
-              >
-                <option value="">선택</option>
-                {fireIntensities.map((level, i) => (
-                  <option key={i} value={level}>
-                    {level}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block mb-1">훈련 시간</label>
-              <select
+              <label className="block mb-1">훈련 시간(분)</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="30분에서 90분 정도가 적당합니다."
                 value={trainingTime}
-                onChange={(e) => setTrainingTime(e.target.value)}
+                onChange={(e) => handleTrainingTimeChange(e.target.value)}
                 disabled={fireSetting === "자동설정" || isAllAuto}
                 className={`border px-3 py-2 rounded w-full ${
                   fireSetting === "자동설정" || isAllAuto
                     ? "bg-gray-100 opacity-50"
                     : ""
                 }`}
-              >
-                <option value="">선택</option>
-                {trainingTimes.map((time, i) => (
-                  <option key={i} value={time}>
-                    {time}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
           </div>
         </div>
@@ -622,18 +574,6 @@ function ScenarioManagement() {
               </select>
             </div>
           </div>
-        </div>
-
-        {/* 참여자 설정 */}
-        <div className="p-4 bg-white rounded shadow space-y-2">
-          <h3 className="text-xl font-semibold text-[#2E7D32]">참여자 설정</h3>
-          <input
-            type="text"
-            placeholder="참여 인원 입력"
-            value={participants}
-            onChange={(e) => setParticipants(e.target.value)}
-            className="w-full border px-3 py-2 rounded"
-          />
         </div>
 
         {/* 저장 버튼들 */}

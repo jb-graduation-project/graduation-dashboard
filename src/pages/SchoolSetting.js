@@ -88,7 +88,6 @@ export default function SchoolSetting() {
         return `rgba(0,0,0,0)`;
     }
   }
-
   // ====== Floor model ======
   const makeEmptyFloor = useCallback(() => {
     return {
@@ -316,72 +315,28 @@ export default function SchoolSetting() {
     [savedPlans, selectedPlanId],
   );
 
-  // 기본 구조도 하나 로드(테스트)
-  useEffect(() => {
-    async function loadDefaultPlans() {
-      try {
-        // ✅ 1/2/3층 json 각각 로드
-        const floorsPayload = await Promise.all(
-          DEFAULT_FLOOR_JSONS.map(async (f) => {
-            const res = await fetch(f.url);
-            if (!res.ok) throw new Error(await res.text());
-            const payload = await res.json();
+  // Beacon UI tuning
+  const BEACON_SIZE = 28; // 자연좌표 기준 비콘 원 크기
+  const BEACON_FONT_MIN = 14; // 숫자 최소 폰트
+  // ====== Beacon modal ======
+  const [isBeaconModalOpen, setIsBeaconModalOpen] = useState(false);
+  const [beaconForm, setBeaconForm] = useState({
+    uuid: "",
+    major: "",
+    minor: "",
+  });
+  const [pendingBeaconNat, setPendingBeaconNat] = useState(null);
 
-            // json 포맷이 { elements: [...] } 라고 가정
-            const elementsRaw = Array.isArray(payload?.elements)
-              ? payload.elements
-              : [];
+  const [editingBeaconId, setEditingBeaconId] = useState(null);
 
-            const elements = elementsRaw.map((el) => {
-              if (el?.type !== "비상구") return el;
-
-              // 비상구가 (x,y,width,height) 사각형으로 저장되어 있었다고 가정
-              const cx = (el.x || 0) + (el.width || 0) / 2;
-              const cy = (el.y || 0) + (el.height || 0) / 2;
-
-              return {
-                ...el,
-                type: "비콘",
-                x: cx,
-                y: cy,
-                width: 16, // ← 비콘 크기(원 크기). 원하는 값으로 조절
-                height: 16,
-              };
-            });
-
-            return {
-              name: f.name,
-              // ✅ 이미지 임시 고정
-              image: {
-                src: f.img,
-                natural: payload?.image?.natural || { w: 1000, h: 600 },
-              },
-              elements,
-            };
-          }),
-        );
-
-        const id = "default-3floors";
-        const planName = "school-setting (1~3층)";
-
-        setSavedPlans((prev) => {
-          const exists = prev.some((p) => p.id === id);
-          if (exists) return prev;
-          return [
-            ...prev,
-            { id, name: planName, payload: { floors: floorsPayload } },
-          ];
-        });
-
-        setSelectedPlanId((prev) => prev ?? id);
-        setPlanFloorIdx(0);
-      } catch (e) {
-        console.error("기본 구조도 로드 실패:", e);
-      }
-    }
-
-    loadDefaultPlans();
-  }, []);
+  // 현재 층에서 다음 비콘 번호 계산 (1부터)
+  const nextBeaconNo = useMemo(() => {
+    const currEls = (floors[currentFloorIndex]?.elements || []).filter(
+      (el) => el.type === "비콘" && (el.floor ?? 0) === currentFloorIndex,
+    );
+    const maxNo = currEls.reduce((m, el) => Math.max(m, el.beaconNo || 0), 0);
+    return maxNo + 1;
+  }, [floors, currentFloorIndex]);
 
   const importPlanFiles = useCallback(async (files) => {
     const arr = Array.from(files || []);
@@ -411,6 +366,88 @@ export default function SchoolSetting() {
       }
     }
   }, []);
+
+  const confirmAddBeacon = useCallback(() => {
+    if (!pendingBeaconNat) return;
+
+    const uuid = (beaconForm.uuid || "").trim();
+    const majorNum = Number(beaconForm.major);
+    const minorNum = Number(beaconForm.minor);
+
+    if (!uuid) return alert("UUID를 입력하세요.");
+    if (!Number.isInteger(majorNum)) return alert("Major는 정수로 입력하세요.");
+    if (!Number.isInteger(minorNum)) return alert("Minor는 정수로 입력하세요.");
+
+    const floorIdx = pendingBeaconNat.floorIdx ?? currentFloorIndex;
+
+    pushUndoSnapshot();
+
+    // ✅ [수정 모드]
+    if (editingBeaconId) {
+      setElements((prev) =>
+        prev.map((el) => {
+          if (el.id !== editingBeaconId) return el;
+          return {
+            ...el,
+            beaconUuid: uuid,
+            beaconMajor: majorNum,
+            beaconMinor: minorNum,
+            x: pendingBeaconNat.x,
+            y: pendingBeaconNat.y,
+            width: el.width || BEACON_SIZE,
+            height: el.height || BEACON_SIZE,
+          };
+        }),
+      );
+
+      setIsBeaconModalOpen(false);
+      setPendingBeaconNat(null);
+      setEditingBeaconId(null);
+      return;
+    }
+
+    // ✅ [추가 모드]
+    const id = `beacon-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const newBeacon = {
+      id,
+      type: "비콘",
+      x: pendingBeaconNat.x,
+      y: pendingBeaconNat.y,
+      width: BEACON_SIZE,
+      height: BEACON_SIZE,
+      floor: floorIdx,
+      beaconUuid: uuid,
+      beaconMajor: majorNum,
+      beaconMinor: minorNum,
+      beaconNo: nextBeaconNo,
+    };
+
+    if (floorIdx !== currentFloorIndex) {
+      alert("비콘 추가 중 층이 변경되었습니다.");
+      setIsBeaconModalOpen(false);
+      setPendingBeaconNat(null);
+      return;
+    }
+
+    setElements((prev) => [...prev, newBeacon]);
+    setSelectedId(id);
+    setSelectedIds([id]);
+
+    setIsBeaconModalOpen(false);
+    setPendingBeaconNat(null);
+    setEditingBeaconId(null);
+  }, [
+    pendingBeaconNat,
+    beaconForm,
+    currentFloorIndex,
+    nextBeaconNo,
+    pushUndoSnapshot,
+    setElements,
+    editingBeaconId,
+    BEACON_SIZE,
+    setSelectedId,
+    setSelectedIds,
+  ]);
 
   // 현재 파일의 “층 라벨”
   const currentFloorLabel = useMemo(() => {
@@ -1247,21 +1284,33 @@ export default function SchoolSetting() {
       }
 
       if (mode === "비콘" && inside) {
-        pushUndoSnapshot();
-        const id = `beacon-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const size = 16;
-        const newExit = {
-          id,
-          type: "비콘",
+        // ✅ 기존 비콘 클릭이면 "수정"
+        if (clicked?.kind === "beacon") {
+          const b = clicked.el;
+          setEditingBeaconId(b.id);
+          setPendingBeaconNat({
+            x: b.x,
+            y: b.y,
+            floorIdx: b.floor ?? currentFloorIndex,
+          });
+          setBeaconForm({
+            uuid: b.beaconUuid || "",
+            major: String(b.beaconMajor ?? ""),
+            minor: String(b.beaconMinor ?? ""),
+          });
+          setIsBeaconModalOpen(true);
+          return;
+        }
+
+        // ✅ 빈 곳 클릭이면 "추가"
+        setEditingBeaconId(null);
+        setPendingBeaconNat({
           x: nat.x,
           y: nat.y,
-          width: size,
-          height: size,
-          floor: currentFloorIndex,
-        };
-        setElements((prev) => [...prev, newExit]);
-        setSelectedId(id);
-        setSelectedIds([id]);
+          floorIdx: currentFloorIndex,
+        });
+        setBeaconForm({ uuid: "", major: "", minor: "" });
+        setIsBeaconModalOpen(true);
         return;
       }
 
@@ -2269,7 +2318,9 @@ export default function SchoolSetting() {
                 if (el.type === "비콘") {
                   const dispX = natToDispX(el.x);
                   const dispY = natToDispY(el.y);
-                  const size = (el.width || 24) * displayedScale;
+                  const sizeNat = el.width || BEACON_SIZE;
+                  const size = sizeNat * displayedScale;
+                  const fontSize = Math.max(BEACON_FONT_MIN, size * 0.55);
 
                   const isSelected = selectedIds.includes(el.id);
                   const isHoverB =
@@ -2278,6 +2329,7 @@ export default function SchoolSetting() {
                   return (
                     <div
                       key={el.id}
+                      title={`${el.beaconUuid || ""}\nMajor:${el.beaconMajor ?? ""} Minor:${el.beaconMinor ?? ""}`}
                       style={{
                         position: "absolute",
                         left: dispX - size / 2,
@@ -2295,8 +2347,19 @@ export default function SchoolSetting() {
                         boxShadow: "0 6px 14px rgba(0,0,0,0.18)",
                         pointerEvents: "auto",
                         zIndex: 32,
+
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 900,
+                        fontSize,
+                        color: "#111",
+                        textShadow: "0 1px 0 rgba(255,255,255,0.85)",
+                        userSelect: "none",
                       }}
-                    />
+                    >
+                      {el.beaconNo ?? ""}
+                    </div>
                   );
                 }
 
@@ -2773,22 +2836,12 @@ export default function SchoolSetting() {
                           ? selectedPlan.payload.floors[planFloorIdx]
                           : selectedPlan?.payload;
 
-                        if (!floorData) return;
-
-                        pushUndoSnapshot();
-
                         const fixed = (floorData.elements || []).map((el) => ({
                           ...el,
                           floor: currentFloorIndex,
                         }));
-
-                        const imgPath =
-                          floorData?.image?.src ||
-                          floorData?.imageSrc ||
-                          floorData?.imagePath ||
-                          "1층.png";
-
-                        const publicSrc = toPublicImg(imgPath); // ✅ 항상 /img/1층.png 형태
+                        const src = floorData?.image?.src || "/img/1층.png";
+                        const publicSrc = src.startsWith("/") ? src : `/${src}`;
 
                         setFloors((prev) => {
                           const next = [...prev];
@@ -2797,10 +2850,10 @@ export default function SchoolSetting() {
 
                           next[currentFloorIndex] = {
                             ...curr,
-                            imageSrc: publicSrc, // ✅ 무조건 1층 이미지
+                            imageSrc: publicSrc,
                             uploadedFile: null,
                             imgNatural:
-                              floorData?.image?.natural || curr.imgNatural, // ✅ floor별 natural 있으면 사용
+                              floorData?.image?.natural || curr.imgNatural,
                             elements: fixed,
                           };
                           return next;
@@ -2858,6 +2911,119 @@ export default function SchoolSetting() {
                 onClick={saveCurrentPlanToList}
               >
                 저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ✅ 비콘 입력 모달 */}
+      {isBeaconModalOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center"
+          onMouseDown={() => {
+            setIsBeaconModalOpen(false);
+            setPendingBeaconNat(null);
+            setEditingBeaconId(null);
+          }}
+        >
+          <div
+            className="bg-white w-[520px] rounded-lg shadow p-4 relative"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-bold">
+                {editingBeaconId ? "비콘 정보 수정" : "비콘 정보 입력"}
+              </div>
+              <button
+                onClick={() => {
+                  setIsBeaconModalOpen(false);
+                  setPendingBeaconNat(null);
+                  setEditingBeaconId(null);
+                }}
+                className="w-9 h-9 rounded hover:bg-gray-100 text-gray-700 text-xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="text-sm text-gray-700 mb-3">
+              이 위치에 추가할 비콘의 UUID / Major / Minor 를 입력하세요.
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <div className="text-xs text-gray-600 mb-1">UUID</div>
+                <input
+                  value={beaconForm.uuid}
+                  onChange={(e) =>
+                    setBeaconForm((p) => ({ ...p, uuid: e.target.value }))
+                  }
+                  className="w-full border rounded px-3 py-2"
+                  placeholder="예: 31415926-5358-9793-2384-626433832795"
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <div className="text-xs text-gray-600 mb-1">Major</div>
+                  <input
+                    value={beaconForm.major}
+                    onChange={(e) =>
+                      setBeaconForm((p) => ({ ...p, major: e.target.value }))
+                    }
+                    className="w-full border rounded px-3 py-2"
+                    placeholder="예: 3"
+                    inputMode="numeric"
+                  />
+                </div>
+
+                <div>
+                  <div className="text-xs text-gray-600 mb-1">Minor</div>
+                  <input
+                    value={beaconForm.minor}
+                    onChange={(e) =>
+                      setBeaconForm((p) => ({ ...p, minor: e.target.value }))
+                    }
+                    className="w-full border rounded px-3 py-2"
+                    placeholder="예: 301"
+                    inputMode="numeric"
+                  />
+                </div>
+              </div>
+
+              <div className="text-xs text-gray-500 pt-2">
+                {editingBeaconId ? (
+                  <div className="text-xs text-gray-500 pt-2">
+                    표시 번호:{" "}
+                    <b>
+                      {elements.find((e) => e.id === editingBeaconId)
+                        ?.beaconNo ?? "-"}
+                    </b>
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-500 pt-2">
+                    표시 번호: <b>{nextBeaconNo}</b> (현재 층 기준 자동 부여)
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                className="px-4 py-2 rounded border hover:bg-gray-50"
+                onClick={() => {
+                  setIsBeaconModalOpen(false);
+                  setPendingBeaconNat(null);
+                }}
+              >
+                취소
+              </button>
+              <button
+                onClick={confirmAddBeacon}
+                className="px-6 py-2 rounded bg-[#2E7D32] text-white font-bold hover:bg-[#256428]"
+              >
+                {editingBeaconId ? "수정" : "추가"}
               </button>
             </div>
           </div>
