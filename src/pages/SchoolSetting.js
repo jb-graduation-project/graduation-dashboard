@@ -473,10 +473,28 @@ export default function SchoolSetting() {
       })),
     };
 
+    // 1. 목록(state)에도 저장
     const id = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     setSavedPlans((prev) => [...prev, { id, name, payload }]);
     setSelectedPlanId(id);
     setPlanFloorIdx(0);
+
+    // 2. 실제 JSON 파일 다운로드
+    const jsonStr = JSON.stringify(payload, null, 2);
+    const blob = new Blob([jsonStr], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    URL.revokeObjectURL(url);
+
     setIsSavePlanModalOpen(false);
     setSavePlanName("");
   }, [floors, floorNames, savePlanName]);
