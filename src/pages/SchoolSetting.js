@@ -7,8 +7,10 @@ import React, {
   useState,
 } from "react";
 import Navbar from "../components/Navbar";
+import axios from "axios";
+import { useLocation } from "react-router-dom";
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "https://disasterar.onenyang.shop";
 
 const DEFAULT_FLOOR_JSONS = [
   { name: "1층", url: "/school-setting-1층.json", img: "/img/1층.png" },
@@ -17,15 +19,54 @@ const DEFAULT_FLOOR_JSONS = [
 ];
 
 export default function SchoolSetting() {
+  const location = useLocation();
+
+  const classroomId = useMemo(() => {
+    return (
+      location.state?.classroomId ||
+      location.state?.roomId ||
+      location.state?.classroomID ||
+      null
+    );
+  }, [location.state]);
+
+  const schoolId = useMemo(() => {
+    return (
+      location.state?.schoolId ||
+      location.state?.channelId ||
+      location.state?.id ||
+      null
+    );
+  }, [location.state]);
+
+  const userId = useMemo(() => {
+    try {
+      const user = JSON.parse(localStorage.getItem("user") || "null");
+      return user?.userId || user?.id || null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const authHeaders = useMemo(() => {
+    const token = localStorage.getItem("token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
+
+  const [mapVersions, setMapVersions] = useState([]);
+  const [activeMapVersionId, setActiveMapVersionId] = useState(null);
+  const [mapLoading, setMapLoading] = useState(false);
+
+  const [beaconList, setBeaconList] = useState([]);
+  const [beaconLoading, setBeaconLoading] = useState(false);
+
   // ====== Viewport ======
   const VIEW_W = 900;
   const VIEW_H = 600;
   const MIN_ZOOM = 0.5;
 
-  const fileInputRef = useRef(null);
   const viewportRef = useRef(null);
   const menuRef = useRef(null);
-  const jsonInputRef = useRef(null);
 
   const [autoAnalyzing, setAutoAnalyzing] = useState(false);
 
@@ -73,6 +114,21 @@ export default function SchoolSetting() {
   const clamp = useCallback((v, a, b) => Math.max(a, Math.min(b, v)), []);
   const round4 = (n) =>
     typeof n === "number" ? Math.round(n * 10000) / 10000 : n;
+
+  const showAxiosError = useCallback((title, errOrRes) => {
+    if (errOrRes?.status) {
+      alert(
+        `${title} (${errOrRes.status})\n\n${
+          typeof errOrRes.data === "string"
+            ? errOrRes.data
+            : JSON.stringify(errOrRes.data, null, 2)
+        }`,
+      );
+      return;
+    }
+
+    alert(`${title}\n\n${errOrRes?.message || "알 수 없는 오류"}`);
+  }, []);
 
   function typeColor(type, alpha = 0.25) {
     switch (type) {
@@ -338,36 +394,117 @@ export default function SchoolSetting() {
     return maxNo + 1;
   }, [floors, currentFloorIndex]);
 
-  const importPlanFiles = useCallback(async (files) => {
-    const arr = Array.from(files || []);
-    if (!arr.length) return;
-
-    for (const file of arr) {
-      try {
-        const text = await file.text();
-        const payload = JSON.parse(text);
-
-        // (예전 포맷) { elements: [...] } 또는 (새 포맷) { floors: [...] }
-        const ok =
-          (payload && Array.isArray(payload.elements)) ||
-          (payload && Array.isArray(payload.floors));
-        if (!ok) {
-          alert(`올바른 구조도 JSON이 아닙니다: ${file.name}`);
-          continue;
-        }
-
-        const id = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        setSavedPlans((prev) => [...prev, { id, name: file.name, payload }]);
-        setSelectedPlanId(id);
-        setPlanFloorIdx(0);
-      } catch (e) {
-        console.error(e);
-        alert(`JSON 읽기 실패: ${file.name}`);
-      }
+  const fetchBeacons = useCallback(async () => {
+    if (!schoolId) {
+      setBeaconList([]);
+      return;
     }
-  }, []);
 
-  const confirmAddBeacon = useCallback(() => {
+    try {
+      setBeaconLoading(true);
+
+      const res = await axios.get(`${API_BASE}/api/beacons`, {
+        params: { schoolId },
+        headers: { ...authHeaders },
+        timeout: 10000,
+        validateStatus: () => true,
+      });
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        setBeaconList([]);
+        showAxiosError("비콘 목록 조회 실패", res);
+        return;
+      }
+
+      const list = Array.isArray(res.data) ? res.data : [];
+      setBeaconList(list);
+    } catch (err) {
+      console.error(err);
+      setBeaconList([]);
+      showAxiosError("비콘 목록 조회 중 오류", err);
+    } finally {
+      setBeaconLoading(false);
+    }
+  }, [schoolId, authHeaders, showAxiosError]);
+  const createBeaconOnServer = useCallback(
+    async ({ floorIndex, x, y, uuid, major, minor, beaconNo }) => {
+      if (!schoolId) {
+        alert("schoolId가 없습니다.");
+        return null;
+      }
+
+      const payload = {
+        schoolId,
+        floorIndex,
+        uuid,
+        major,
+        minor,
+        beaconNo,
+        mac: "",
+        x,
+        y,
+        realXM: 0,
+        realYM: 0,
+        realZM: 0,
+        name: `비콘 ${beaconNo}`,
+        txPower: 0,
+      };
+
+      const res = await axios.post(`${API_BASE}/api/beacons`, payload, {
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        timeout: 10000,
+        validateStatus: () => true,
+      });
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("비콘 등록 실패", res);
+        return null;
+      }
+
+      return res.data || null;
+    },
+    [schoolId, authHeaders, showAxiosError],
+  );
+  const updateBeaconOnServer = useCallback(
+    async (beaconId, payload) => {
+      const res = await axios.put(
+        `${API_BASE}/api/beacons/${beaconId}`,
+        payload,
+        {
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("비콘 수정 실패", res);
+        return null;
+      }
+
+      return res.data || null;
+    },
+    [authHeaders, showAxiosError],
+  );
+  const deleteBeaconOnServer = useCallback(
+    async (beaconId) => {
+      const res = await axios.delete(`${API_BASE}/api/beacons/${beaconId}`, {
+        headers: { ...authHeaders },
+        timeout: 10000,
+        validateStatus: () => true,
+      });
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("비콘 삭제 실패", res);
+        return false;
+      }
+
+      return true;
+    },
+    [authHeaders, showAxiosError],
+  );
+
+  const confirmAddBeacon = useCallback(async () => {
     if (!pendingBeaconNat) return;
 
     const uuid = (beaconForm.uuid || "").trim();
@@ -382,8 +519,37 @@ export default function SchoolSetting() {
 
     pushUndoSnapshot();
 
-    // ✅ [수정 모드]
+    // 수정 모드
     if (editingBeaconId) {
+      const localBeacon = elements.find((el) => el.id === editingBeaconId);
+      const serverBeaconId = localBeacon?.serverBeaconId;
+
+      if (!serverBeaconId) {
+        alert("서버 비콘 ID가 없어 수정할 수 없습니다.");
+        return;
+      }
+
+      const payload = {
+        schoolId,
+        floorIndex: floorIdx,
+        uuid,
+        major: majorNum,
+        minor: minorNum,
+        beaconNo: localBeacon?.beaconNo || nextBeaconNo,
+        mac: localBeacon?.mac || "",
+        x: pendingBeaconNat.x,
+        y: pendingBeaconNat.y,
+        realXM: localBeacon?.realXM || 0,
+        realYM: localBeacon?.realYM || 0,
+        realZM: localBeacon?.realZM || 0,
+        name:
+          localBeacon?.name || `비콘 ${localBeacon?.beaconNo || nextBeaconNo}`,
+        txPower: localBeacon?.txPower || 0,
+      };
+
+      const updated = await updateBeaconOnServer(serverBeaconId, payload);
+      if (!updated) return;
+
       setElements((prev) =>
         prev.map((el) => {
           if (el.id !== editingBeaconId) return el;
@@ -400,13 +566,27 @@ export default function SchoolSetting() {
         }),
       );
 
+      await fetchBeacons();
+
       setIsBeaconModalOpen(false);
       setPendingBeaconNat(null);
       setEditingBeaconId(null);
       return;
     }
 
-    // ✅ [추가 모드]
+    // 추가 모드
+    const created = await createBeaconOnServer({
+      floorIndex: floorIdx,
+      x: pendingBeaconNat.x,
+      y: pendingBeaconNat.y,
+      uuid,
+      major: majorNum,
+      minor: minorNum,
+      beaconNo: nextBeaconNo,
+    });
+
+    if (!created) return;
+
     const id = `beacon-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const newBeacon = {
       id,
@@ -419,19 +599,21 @@ export default function SchoolSetting() {
       beaconUuid: uuid,
       beaconMajor: majorNum,
       beaconMinor: minorNum,
-      beaconNo: nextBeaconNo,
+      beaconNo: created.beaconNo ?? nextBeaconNo,
+      serverBeaconId: created.beaconId,
+      mac: created.mac || "",
+      realXM: created.realXM || 0,
+      realYM: created.realYM || 0,
+      realZM: created.realZM || 0,
+      name: created.name || `비콘 ${created.beaconNo ?? nextBeaconNo}`,
+      txPower: created.txPower || 0,
     };
-
-    if (floorIdx !== currentFloorIndex) {
-      alert("비콘 추가 중 층이 변경되었습니다.");
-      setIsBeaconModalOpen(false);
-      setPendingBeaconNat(null);
-      return;
-    }
 
     setElements((prev) => [...prev, newBeacon]);
     setSelectedId(id);
     setSelectedIds([id]);
+
+    await fetchBeacons();
 
     setIsBeaconModalOpen(false);
     setPendingBeaconNat(null);
@@ -442,9 +624,14 @@ export default function SchoolSetting() {
     currentFloorIndex,
     nextBeaconNo,
     pushUndoSnapshot,
-    setElements,
     editingBeaconId,
+    elements,
+    schoolId,
     BEACON_SIZE,
+    updateBeaconOnServer,
+    createBeaconOnServer,
+    fetchBeacons,
+    setElements,
     setSelectedId,
     setSelectedIds,
   ]);
@@ -453,6 +640,109 @@ export default function SchoolSetting() {
   const currentFloorLabel = useMemo(() => {
     return floorNames[currentFloorIndex] || `${currentFloorIndex + 1}층`;
   }, [currentFloorIndex, floorNames]);
+
+  const buildFloorsPayload = useCallback(() => {
+    return floors.map((f, idx) => ({
+      name: floorNames[idx] || `${idx + 1}층`,
+      image: {
+        src: f.imageSrc || "/img/1층.png",
+        natural: f.imgNatural || { w: 0, h: 0 },
+      },
+      elements: (f.elements || []).map((el) => ({
+        ...el,
+        floor: idx,
+      })),
+    }));
+  }, [floors, floorNames]);
+
+  const fetchMapVersions = useCallback(async () => {
+    if (!classroomId) {
+      setMapVersions([]);
+      return;
+    }
+
+    try {
+      setMapLoading(true);
+
+      const res = await axios.get(
+        `${API_BASE}/api/rooms/${classroomId}/map-versions`,
+        {
+          headers: { ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        setMapVersions([]);
+        showAxiosError("맵 버전 목록 조회 실패", res);
+        return;
+      }
+
+      const list = Array.isArray(res.data) ? res.data : [];
+      setMapVersions(list);
+    } catch (err) {
+      console.error(err);
+      setMapVersions([]);
+      showAxiosError("맵 버전 목록 조회 중 오류", err);
+    } finally {
+      setMapLoading(false);
+    }
+  }, [classroomId, authHeaders, showAxiosError]);
+  const fetchActiveMap = useCallback(async () => {
+    if (!classroomId) return;
+
+    try {
+      const res = await axios.get(`${API_BASE}/api/rooms/${classroomId}/map`, {
+        headers: { ...authHeaders },
+        timeout: 10000,
+        validateStatus: () => true,
+      });
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        return;
+      }
+
+      const data = res.data || {};
+      setActiveMapVersionId(data.mapVersionId || null);
+
+      if (!data.floorsJson) return;
+
+      const parsedFloors = JSON.parse(data.floorsJson);
+      if (!Array.isArray(parsedFloors) || parsedFloors.length === 0) return;
+
+      setFloorNames(parsedFloors.map((f, idx) => f?.name || `${idx + 1}층`));
+
+      setFloors(
+        parsedFloors.map((f, idx) => ({
+          imageSrc: f?.image?.src || null,
+          uploadedFile: null,
+          imgNatural: f?.image?.natural || { w: 0, h: 0 },
+          elements: Array.isArray(f?.elements)
+            ? f.elements.map((el) => ({ ...el, floor: idx }))
+            : [],
+          undoStack: [],
+          redoStack: [],
+          hasAutoAnalysisResult: false,
+          autoElementsCache: [],
+          autoAnalysisHidden: false,
+          abort: { analyze: null },
+        })),
+      );
+
+      setCurrentFloorIndex(0);
+    } catch (err) {
+      console.error(err);
+    }
+  }, [classroomId, authHeaders]);
+
+  useEffect(() => {
+    if (!classroomId) return;
+
+    fetchMapVersions();
+    fetchActiveMap();
+    fetchBeacons();
+  }, [classroomId, fetchMapVersions, fetchActiveMap, fetchBeacons]);
 
   // ====== Save plan to list ======
   const saveCurrentPlanToList = useCallback(() => {
@@ -545,6 +835,58 @@ export default function SchoolSetting() {
     },
     [imgNatural.h, imgNatural.w],
   );
+  const saveMapVersionToServer = useCallback(async () => {
+    if (!classroomId) {
+      alert("classroomId가 없습니다.");
+      return;
+    }
+
+    if (!schoolId) {
+      alert("schoolId가 없습니다.");
+      return;
+    }
+
+    const label = window.prompt("맵 버전 이름을 입력하세요", "");
+    if (!label || !label.trim()) return;
+
+    const payload = {
+      schoolId,
+      label: label.trim(),
+      createdBy: userId || "",
+      floorsJson: JSON.stringify(buildFloorsPayload()),
+    };
+
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/rooms/${classroomId}/map-versions`,
+        payload,
+        {
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("맵 버전 저장 실패", res);
+        return;
+      }
+
+      alert("✅ 맵 버전이 저장되었습니다.");
+      await fetchMapVersions();
+    } catch (err) {
+      console.error(err);
+      showAxiosError("맵 버전 저장 중 오류", err);
+    }
+  }, [
+    classroomId,
+    schoolId,
+    userId,
+    buildFloorsPayload,
+    authHeaders,
+    showAxiosError,
+    fetchMapVersions,
+  ]);
 
   const applyZoomAroundPoint = useCallback(
     (oldZoom, newZoom, centerClient) => {
@@ -862,51 +1204,6 @@ export default function SchoolSetting() {
       return null;
     },
     [elements, currentFloorIndex, displayedScale],
-  );
-
-  // ====== Image upload ======
-  const onImageChange = useCallback(
-    (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      const url = URL.createObjectURL(file);
-      const floorIdx = currentFloorIndex;
-
-      setFloors((prev) => {
-        const next = [...prev];
-        const curr = next[floorIdx] || makeEmptyFloor();
-        next[floorIdx] = {
-          ...curr,
-          imageSrc: url,
-          uploadedFile: file,
-          imgNatural: { w: 0, h: 0 },
-          elements: [],
-          undoStack: [],
-          redoStack: [],
-          hasAutoAnalysisResult: false,
-          autoElementsCache: [],
-        };
-        return next;
-      });
-
-      setMode(null);
-      setImageLoaded(false);
-      setFitScale(1);
-      setZoom(1);
-      setImgOffset({ x: 0, y: 0 });
-      setSelectedId(null);
-      setSelectedIds([]);
-      setEditingResizeId(null);
-      setPreview(null);
-      setOutlineRawPoints([]);
-      setOutlinePoints([]);
-      setContextMenu(null);
-      setShowHelp(false);
-
-      runAutoAnalyze(floorIdx, file);
-    },
-    [currentFloorIndex, makeEmptyFloor, runAutoAnalyze],
   );
 
   const onImgLoad = useCallback(
@@ -1723,8 +2020,15 @@ export default function SchoolSetting() {
       } else {
         opts.push({
           label: "삭제",
-          action: () => {
+          action: async () => {
             pushUndoSnapshot();
+
+            if (hit.el.type === "비콘" && hit.el.serverBeaconId) {
+              const ok = await deleteBeaconOnServer(hit.el.serverBeaconId);
+              if (!ok) return;
+              await fetchBeacons();
+            }
+
             setElements((prev) => prev.filter((p) => p.id !== hit.el.id));
             setContextMenu(null);
             setSelectedId(null);
@@ -1777,6 +2081,137 @@ export default function SchoolSetting() {
     ],
   );
 
+  const updateMapVersionToServer = useCallback(
+    async (mapVersionId) => {
+      if (!classroomId || !mapVersionId) {
+        alert("수정할 mapVersionId가 없습니다.");
+        return;
+      }
+
+      const label = window.prompt("수정할 맵 버전 이름을 입력하세요", "");
+      if (!label || !label.trim()) return;
+
+      try {
+        const res = await axios.put(
+          `${API_BASE}/api/rooms/${classroomId}/map-versions/${mapVersionId}`,
+          {
+            label: label.trim(),
+            floorsJson: JSON.stringify(buildFloorsPayload()),
+          },
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("맵 버전 수정 실패", res);
+          return;
+        }
+
+        alert("✅ 맵 버전이 수정되었습니다.");
+        await fetchMapVersions();
+      } catch (err) {
+        console.error(err);
+        showAxiosError("맵 버전 수정 중 오류", err);
+      }
+    },
+    [
+      classroomId,
+      buildFloorsPayload,
+      authHeaders,
+      showAxiosError,
+      fetchMapVersions,
+    ],
+  );
+  const setActiveMapToServer = useCallback(
+    async (mapVersionId) => {
+      if (!classroomId || !mapVersionId) {
+        alert("활성화할 mapVersionId가 없습니다.");
+        return;
+      }
+
+      try {
+        const res = await axios.put(
+          `${API_BASE}/api/rooms/${classroomId}/active-map`,
+          { mapVersionId },
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("활성 맵 설정 실패", res);
+          return;
+        }
+
+        setActiveMapVersionId(mapVersionId);
+        alert("✅ 활성 맵이 변경되었습니다.");
+        await fetchMapVersions();
+      } catch (err) {
+        console.error(err);
+        showAxiosError("활성 맵 설정 중 오류", err);
+      }
+    },
+    [classroomId, authHeaders, showAxiosError, fetchMapVersions],
+  );
+  const loadMapVersionDetail = useCallback(
+    async (mapVersionId) => {
+      if (!classroomId || !mapVersionId) return;
+
+      try {
+        const res = await axios.get(
+          `${API_BASE}/api/rooms/${classroomId}/map-versions/${mapVersionId}`,
+          {
+            headers: { ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("맵 버전 상세 조회 실패", res);
+          return;
+        }
+
+        const data = res.data || {};
+        const parsedFloors = JSON.parse(data.floorsJson || "[]");
+
+        if (!Array.isArray(parsedFloors) || parsedFloors.length === 0) {
+          alert("불러올 floorsJson이 비어 있습니다.");
+          return;
+        }
+
+        setActiveMapVersionId(data.mapVersionId || null);
+        setFloorNames(parsedFloors.map((f, idx) => f?.name || `${idx + 1}층`));
+        setFloors(
+          parsedFloors.map((f, idx) => ({
+            imageSrc: f?.image?.src || null,
+            uploadedFile: null,
+            imgNatural: f?.image?.natural || { w: 0, h: 0 },
+            elements: Array.isArray(f?.elements)
+              ? f.elements.map((el) => ({ ...el, floor: idx }))
+              : [],
+            undoStack: [],
+            redoStack: [],
+            hasAutoAnalysisResult: false,
+            autoElementsCache: [],
+            autoAnalysisHidden: false,
+            abort: { analyze: null },
+          })),
+        );
+
+        setCurrentFloorIndex(0);
+      } catch (err) {
+        console.error(err);
+        showAxiosError("맵 버전 상세 조회 중 오류", err);
+      }
+    },
+    [classroomId, authHeaders, showAxiosError],
+  );
   useEffect(() => {
     function onDocMouseDown(e) {
       if (contextMenu && menuRef.current && !menuRef.current.contains(e.target))
@@ -1887,46 +2322,11 @@ export default function SchoolSetting() {
         <div className="p-4 bg-white rounded shadow space-y-4">
           <div className="flex flex-wrap gap-3 items-center justify-between">
             <div className="flex flex-wrap gap-3 items-center">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={onImageChange}
-                style={{ display: "none" }}
-              />
-
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className={btnGray}
-              >
-                이미지 업로드
-              </button>
-
-              {/* JSON 숨김 input */}
-              <input
-                ref={jsonInputRef}
-                type="file"
-                accept=".json,application/json"
-                multiple
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  importPlanFiles(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-
               <button
                 onClick={() => setIsPlanModalOpen(true)}
                 className={btnGray}
               >
                 구조도 목록
-              </button>
-
-              <button
-                onClick={() => jsonInputRef.current?.click()}
-                className={btnGray}
-              >
-                JSON 추가
               </button>
 
               <button
@@ -2146,7 +2546,7 @@ export default function SchoolSetting() {
                   color: "#777",
                 }}
               >
-                이미지를 업로드하세요 (이 박스 안에서만 편집)
+                저장된 구조도를 불러오거나 맵 버전을 선택하세요.
               </div>
             ) : (
               <div
@@ -2926,10 +3326,87 @@ export default function SchoolSetting() {
             <div className="flex justify-end mt-4">
               <button
                 className="px-6 py-2 rounded bg-[#2E7D32] text-white font-bold hover:bg-[#256428]"
-                onClick={saveCurrentPlanToList}
+                onClick={saveMapVersionToServer}
               >
                 저장
               </button>
+              <div className="p-4 bg-white rounded shadow space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-[#2E7D32]">
+                    맵 버전 목록
+                  </h3>
+                  <button
+                    onClick={fetchMapVersions}
+                    className="px-3 py-2 rounded bg-[#66BB6A] text-white"
+                  >
+                    새로고침
+                  </button>
+                </div>
+
+                {mapLoading && (
+                  <p className="text-sm text-gray-500">불러오는 중...</p>
+                )}
+
+                {!mapLoading && mapVersions.length === 0 && (
+                  <p className="text-sm text-gray-500">
+                    저장된 맵 버전이 없습니다.
+                  </p>
+                )}
+
+                {!mapLoading && mapVersions.length > 0 && (
+                  <div className="space-y-2">
+                    {mapVersions.map((mv) => (
+                      <div
+                        key={mv.mapVersionId}
+                        className={`border rounded p-3 ${
+                          activeMapVersionId === mv.mapVersionId
+                            ? "border-[#2E7D32] bg-[#E8F5E9]"
+                            : "border-gray-200"
+                        }`}
+                      >
+                        <div className="font-semibold">
+                          {mv.label || "(이름 없음)"}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {mv.createdAt
+                            ? new Date(mv.createdAt).toLocaleString()
+                            : ""}
+                          {mv.isActive ? " / 활성 맵" : ""}
+                        </div>
+
+                        <div className="flex gap-2 mt-3">
+                          <button
+                            onClick={() =>
+                              loadMapVersionDetail(mv.mapVersionId)
+                            }
+                            className="px-3 py-1 rounded border"
+                          >
+                            불러오기
+                          </button>
+
+                          <button
+                            onClick={() =>
+                              setActiveMapToServer(mv.mapVersionId)
+                            }
+                            className="px-3 py-1 rounded border"
+                          >
+                            활성화
+                          </button>
+
+                          <button
+                            onClick={() =>
+                              updateMapVersionToServer(mv.mapVersionId)
+                            }
+                            className="px-3 py-1 rounded border"
+                          >
+                            현재 편집본으로 덮어쓰기
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

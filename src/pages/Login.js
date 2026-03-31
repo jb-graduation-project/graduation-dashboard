@@ -2,8 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
-const API_BASE =
-  "https://disaster-ar-backend-a7bvfvd8f6bxbsfh.koreacentral-01.azurewebsites.net";
+const API_BASE = "https://disasterar.onenyang.shop";
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -47,7 +46,7 @@ function Login() {
           timeout: 10000,
           // ✅ 4xx/5xx도 res로 받아서 status별 처리
           validateStatus: () => true,
-        }
+        },
       );
 
       console.log("✅ LOGIN RESPONSE:", res);
@@ -82,7 +81,7 @@ function Login() {
       if (status === 400 || status === 422) {
         alert(
           `❌ 입력값 오류 (${status})\n\n` +
-            (data?.message || data?.detail || JSON.stringify(data, null, 2))
+            (data?.message || data?.detail || JSON.stringify(data, null, 2)),
         );
         return;
       }
@@ -105,7 +104,7 @@ function Login() {
       if (status === 500) {
         alert(
           "🔥 서버 내부 오류 (500)\n\n" +
-            (typeof data === "string" ? data : JSON.stringify(data, null, 2))
+            (typeof data === "string" ? data : JSON.stringify(data, null, 2)),
         );
         return;
       }
@@ -113,7 +112,7 @@ function Login() {
       alert(
         `❌ 로그인 실패 (${status})\n\n서버 응답:\n${
           typeof data === "string" ? data : JSON.stringify(data, null, 2)
-        }`
+        }`,
       );
     } catch (err) {
       // 여기로 오는 경우는 timeout/네트워크/브라우저 차단 같은 케이스
@@ -126,7 +125,7 @@ function Login() {
 
       if (err.request) {
         alert(
-          "🌐 서버로부터 응답이 없습니다.\n\n서버가 다운되었거나 네트워크 문제가 있습니다."
+          "🌐 서버로부터 응답이 없습니다.\n\n서버가 다운되었거나 네트워크 문제가 있습니다.",
         );
         return;
       }

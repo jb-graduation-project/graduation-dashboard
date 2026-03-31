@@ -2,8 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 
-const API_BASE =
-  "https://disaster-ar-backend-a7bvfvd8f6bxbsfh.koreacentral-01.azurewebsites.net";
+const API_BASE = "https://disasterar.onenyang.shop";
 
 function Navbar() {
   const navigate = useNavigate();
@@ -48,7 +47,7 @@ function Navbar() {
   const handleDeleteRoom = async () => {
     if (!classroomId) {
       alert(
-        "교실을 먼저 선택하고 들어와야 삭제할 수 있습니다. (classroomId 없음)"
+        "교실을 먼저 선택하고 들어와야 삭제할 수 있습니다. (classroomId 없음)",
       );
       return;
     }
@@ -58,7 +57,7 @@ function Navbar() {
     }
 
     const ok = window.confirm(
-      "정말 이 교실(방)을 삭제할까요? 이 작업은 되돌릴 수 없습니다."
+      "정말 이 교실(방)을 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
     );
     if (!ok) return;
 
@@ -77,7 +76,7 @@ function Navbar() {
           `방 삭제 실패 (${res.status})\n\n` +
             (typeof res.data === "string"
               ? res.data
-              : JSON.stringify(res.data, null, 2))
+              : JSON.stringify(res.data, null, 2)),
         );
         return;
       }

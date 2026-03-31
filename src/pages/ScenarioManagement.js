@@ -4,8 +4,8 @@ import Navbar from "../components/Navbar";
 import axios from "axios";
 import { useLocation } from "react-router-dom";
 
-const API_BASE =
-  "https://disaster-ar-backend-a7bvfvd8f6bxbsfh.koreacentral-01.azurewebsites.net";
+// ✅ 새 서버 주소
+const API_BASE = "https://disasterar.onenyang.shop";
 
 // 재난 유형별 팀 구성 매핑
 const TEAM_TYPES_BY_DISASTER = {
@@ -36,6 +36,19 @@ function ScenarioManagement() {
     const token = localStorage.getItem("token");
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
+
+  // axios 공통 설정
+  const axiosConfig = useMemo(
+    () => ({
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+      },
+      timeout: 10000,
+      validateStatus: () => true,
+    }),
+    [authHeaders],
+  );
 
   // ====== 시나리오 목록 ======
   const [scenarioList, setScenarioList] = useState([]);
@@ -97,10 +110,11 @@ function ScenarioManagement() {
   useEffect(() => {
     setTeamCounts((prev) => {
       const next = {};
-      teamTypes.forEach((team) => (next[team] = prev[team] || ""));
+      teamTypes.forEach((team) => {
+        next[team] = prev[team] || "";
+      });
       return next;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [disasterType]);
 
   const handleTeamCountChange = (team, value) => {
@@ -111,6 +125,27 @@ function ScenarioManagement() {
   const handleTrainingTimeChange = (value) => {
     const onlyNumber = value.replace(/[^0-9]/g, "");
     setTrainingTime(onlyNumber);
+  };
+
+  // 서버 응답 정규화
+  const normalizeScenario = (s) => {
+    return {
+      id: s?.id ?? s?.scenarioId ?? "",
+      classroomId: s?.classroomId ?? "",
+      scenarioName: s?.scenarioName ?? "",
+      scenarioType: s?.scenarioType ?? "EARTHQUAKE",
+      triggerMode: s?.triggerMode ?? "AUTO",
+      teamMode: s?.teamMode ?? "AUTO",
+      npcMode: s?.npcMode ?? "AUTO",
+      location: s?.location ?? "",
+      intensity: Number(s?.intensity ?? 0),
+      trainTime: Number(s?.trainTime ?? 0),
+      teamAssignmentJson: s?.teamAssignmentJson ?? s?.teamAssignment ?? "{}",
+      npcPositionsJson:
+        s?.npcPositionsJson ?? s?.npcPositions ?? '{"position":"","status":""}',
+      participantCount: Number(s?.participantCount ?? 0),
+      createdTime: s?.createdTime ?? s?.createdAt ?? null,
+    };
   };
 
   const makePayload = (
@@ -124,7 +159,7 @@ function ScenarioManagement() {
     const trainTime = trainingTime ? parseInt(trainingTime, 10) : 0;
 
     const teamAssignment = JSON.stringify(teamCounts || {});
-    const npcPositionsJson = JSON.stringify({
+    const npcPositions = JSON.stringify({
       position: npcPosition || "",
       status: npcStatus || "",
     });
@@ -140,24 +175,42 @@ function ScenarioManagement() {
       intensity: 0,
       trainTime,
       teamAssignment,
-      npcPositions: npcPositionsJson,
+      npcPositions,
       participantCount: 0,
     };
 
-    if (includeScenarioId) return { ...base, scenarioId: selectedScenarioId };
+    if (includeScenarioId) {
+      return {
+        scenarioId: selectedScenarioId,
+        scenarioName: base.scenarioName,
+        scenarioType: base.scenarioType,
+        triggerMode: base.triggerMode,
+        teamMode: base.teamMode,
+        npcMode: base.npcMode,
+        location: base.location,
+        intensity: base.intensity,
+        trainTime: base.trainTime,
+        teamAssignment: base.teamAssignment,
+        npcPositions: base.npcPositions,
+        participantCount: base.participantCount,
+      };
+    }
+
     return base;
   };
 
   const showAxiosError = (title, errOrRes) => {
     if (errOrRes?.status) {
       alert(
-        `${title} (${errOrRes.status})\n\n` +
-          (typeof errOrRes.data === "string"
+        `${title} (${errOrRes.status})\n\n${
+          typeof errOrRes.data === "string"
             ? errOrRes.data
-            : JSON.stringify(errOrRes.data, null, 2)),
+            : JSON.stringify(errOrRes.data, null, 2)
+        }`,
       );
       return;
     }
+
     alert(`${title}\n\n${errOrRes?.message || "알 수 없는 오류"}`);
   };
 
@@ -186,7 +239,10 @@ function ScenarioManagement() {
         return;
       }
 
-      setScenarioList(Array.isArray(res.data) ? res.data : []);
+      const list = Array.isArray(res.data)
+        ? res.data.map(normalizeScenario)
+        : [];
+      setScenarioList(list);
     } catch (err) {
       console.error(err);
       setScenarioList([]);
@@ -209,11 +265,11 @@ function ScenarioManagement() {
       setSaving(true);
 
       const payload = makePayload({ includeScenarioId: false });
-      const res = await axios.post(`${API_BASE}/api/scenarios`, payload, {
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        timeout: 10000,
-        validateStatus: () => true,
-      });
+      const res = await axios.post(
+        `${API_BASE}/api/scenarios`,
+        payload,
+        axiosConfig,
+      );
 
       if (!(res.status >= 200 && res.status < 300)) {
         showAxiosError("시나리오 생성 실패", res);
@@ -238,6 +294,7 @@ function ScenarioManagement() {
       );
       return;
     }
+
     if (!selectedScenarioId) {
       alert("수정할 시나리오를 먼저 선택해 주세요.");
       return;
@@ -248,18 +305,18 @@ function ScenarioManagement() {
 
       const payload = makePayload({ includeScenarioId: true });
 
-      let res = await axios.put(`${API_BASE}/api/scenarios`, payload, {
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        timeout: 10000,
-        validateStatus: () => true,
-      });
+      let res = await axios.put(
+        `${API_BASE}/api/scenarios`,
+        payload,
+        axiosConfig,
+      );
 
       if (res.status === 405) {
-        res = await axios.patch(`${API_BASE}/api/scenarios`, payload, {
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          timeout: 10000,
-          validateStatus: () => true,
-        });
+        res = await axios.patch(
+          `${API_BASE}/api/scenarios`,
+          payload,
+          axiosConfig,
+        );
       }
 
       if (!(res.status >= 200 && res.status < 300)) {
@@ -278,7 +335,9 @@ function ScenarioManagement() {
   };
 
   // ✅ 선택 시 폼에 채우기
-  const handlePickScenario = (s) => {
+  const handlePickScenario = (rawScenario) => {
+    const s = normalizeScenario(rawScenario);
+
     setSelectedScenarioId(s.id);
     setScenarioName(s.scenarioName || "");
 
@@ -309,8 +368,9 @@ function ScenarioManagement() {
   };
 
   useEffect(() => {
-    if (classroomId) fetchScenarioList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (classroomId) {
+      fetchScenarioList();
+    }
   }, [classroomId]);
 
   return (
@@ -497,6 +557,7 @@ function ScenarioManagement() {
           <div className="grid grid-cols-3 gap-4">
             {teamTypes.map((team) => {
               const disabled = teamSetting === "자동설정" || isAllAuto;
+
               return (
                 <div key={team} className="flex flex-col space-y-1">
                   <span className="font-medium">{team}</span>

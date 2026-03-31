@@ -3,8 +3,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
-const API_BASE =
-  "https://disaster-ar-backend-a7bvfvd8f6bxbsfh.koreacentral-01.azurewebsites.net";
+const API_BASE = "https://disasterar.onenyang.shop";
 
 function CreateChannel() {
   const [schoolName, setSchoolName] = useState("");
@@ -144,8 +143,10 @@ function CreateChannel() {
 
       navigate("/room-list", {
         state: {
+          schoolId: data.id,
           channelId: data.id,
           schoolName: data.schoolName ?? trimmed,
+          schoolCode: data.accessCode ?? "UNKNOWN",
           accessCode: data.accessCode ?? "UNKNOWN",
         },
       });

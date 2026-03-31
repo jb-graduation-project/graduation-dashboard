@@ -3,8 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 
-const API_BASE =
-  "https://disaster-ar-backend-a7bvfvd8f6bxbsfh.koreacentral-01.azurewebsites.net";
+const API_BASE = "https://disasterar.onenyang.shop";
 
 function RoomList() {
   const location = useLocation();
@@ -12,7 +11,6 @@ function RoomList() {
 
   const schoolName = location.state?.schoolName || "중부초등학교";
 
-  // ✅ CreateChannel에서 넘긴 값이 schoolId / channelId / id 등일 수 있어서 커버
   const schoolId = useMemo(() => {
     return (
       location.state?.schoolId ||
@@ -22,7 +20,6 @@ function RoomList() {
     );
   }, [location.state]);
 
-  // ✅ 로그인 저장값에서 userId 꺼내기
   const userId = useMemo(() => {
     try {
       const user = JSON.parse(localStorage.getItem("user") || "null");
@@ -32,78 +29,39 @@ function RoomList() {
     }
   }, []);
 
-  // ✅ 토큰 헤더
   const authHeaders = useMemo(() => {
     const token = localStorage.getItem("token");
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 
-  // ✅ 학교코드(schoolCode): 한 번 받아오면 끝 (재발급 기능 없음)
+  // schoolCode는 rooms API에 없어서 state 값 우선 사용
   const [schoolCode, setSchoolCode] = useState(
-    location.state?.schoolCode || "조회 중..."
+    location.state?.schoolCode ||
+      location.state?.accessCode ||
+      location.state?.joinCode ||
+      "없음",
   );
-  const [schoolCodeLoading, setSchoolCodeLoading] = useState(false);
 
-  // 교실 목록
   const [rooms, setRooms] = useState([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
 
-  // 모달
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
 
-  // ====== schoolCode 조회(1회) ======
-  const normalizeCode = (data) => {
-    if (!data) return null;
-    if (typeof data === "string") return data;
-    if (typeof data === "object") {
-      return (
-        data.roomCode || data.accessCode || data.joinCode || data.code || null
+  const showAxiosError = (title, errOrRes) => {
+    if (errOrRes?.status) {
+      alert(
+        `${title} (${errOrRes.status})\n\n${
+          typeof errOrRes.data === "string"
+            ? errOrRes.data
+            : JSON.stringify(errOrRes.data, null, 2)
+        }`,
       );
-    }
-    return null;
-  };
-
-  const fetchSchoolCodeOnce = async () => {
-    // 이미 state로 넘어온 경우: 더 이상 호출 X
-    if (location.state?.schoolCode) {
-      setSchoolCode(location.state.schoolCode);
       return;
     }
-
-    if (!schoolId) {
-      setSchoolCode("UNKNOWN");
-      return;
-    }
-
-    try {
-      setSchoolCodeLoading(true);
-
-      const res = await axios.get(
-        `${API_BASE}/api/channels/${schoolId}/room-code`,
-        {
-          headers: { ...authHeaders },
-          timeout: 10000,
-          validateStatus: () => true,
-        }
-      );
-
-      if (!(res.status >= 200 && res.status < 300)) {
-        setSchoolCode("UNKNOWN");
-        return;
-      }
-
-      const code = normalizeCode(res.data);
-      setSchoolCode(code || "UNKNOWN");
-    } catch (e) {
-      console.error("schoolCode 조회 실패:", e);
-      setSchoolCode("UNKNOWN");
-    } finally {
-      setSchoolCodeLoading(false);
-    }
+    alert(`${title}\n\n${errOrRes?.message || "알 수 없는 오류"}`);
   };
 
-  // ====== 교실 목록 조회 ======
   const fetchRooms = async () => {
     if (!schoolId) {
       setRooms([]);
@@ -121,13 +79,8 @@ function RoomList() {
       });
 
       if (!(res.status >= 200 && res.status < 300)) {
-        alert(
-          `방 목록 조회 실패 (${res.status})\n\n` +
-            (typeof res.data === "string"
-              ? res.data
-              : JSON.stringify(res.data, null, 2))
-        );
         setRooms([]);
+        showAxiosError("방 목록 조회 실패", res);
         return;
       }
 
@@ -137,20 +90,20 @@ function RoomList() {
           classroomId: r.classroomId,
           schoolId: r.schoolId,
           className: r.className,
-          studentCount: r.studentCount ?? 0,
-          joinCode: r.joinCode ?? "", // ✅ 화면에는 숨기지만 SchoolChannel에 전달
-        }))
+          studentCount: Number(r.studentCount ?? 0),
+          joinCode: r.joinCode ?? "",
+          trainingState: r.trainingState ?? "READY",
+        })),
       );
     } catch (e) {
       console.error("방 목록 조회 실패:", e);
-      alert("서버 오류로 방 목록을 불러오지 못했습니다.");
       setRooms([]);
+      showAxiosError("방 목록 조회 중 오류", e);
     } finally {
       setRoomsLoading(false);
     }
   };
 
-  // ====== 교실 생성 ======
   const handleCreateRoom = async () => {
     const className = newRoomName.trim();
     if (!className) return;
@@ -175,16 +128,11 @@ function RoomList() {
           headers: { "Content-Type": "application/json", ...authHeaders },
           timeout: 10000,
           validateStatus: () => true,
-        }
+        },
       );
 
       if (!(res.status >= 200 && res.status < 300)) {
-        alert(
-          `방 생성 실패 (${res.status})\n\n` +
-            (typeof res.data === "string"
-              ? res.data
-              : JSON.stringify(res.data, null, 2))
-        );
+        showAxiosError("방 생성 실패", res);
         return;
       }
 
@@ -193,23 +141,23 @@ function RoomList() {
       await fetchRooms();
     } catch (e) {
       console.error("방 생성 실패:", e);
-      alert("서버 오류로 방 생성에 실패했습니다.");
+      showAxiosError("방 생성 중 오류", e);
     } finally {
       setRoomsLoading(false);
     }
   };
 
-  // ====== 이동 ======
   const goToSchoolChannel = (room) => {
     navigate("/school-channel", {
       state: {
         classroomId: room.classroomId,
         roomName: room.className,
         studentCount: room.studentCount,
-        joinCode: room.joinCode, // 교실 입장 코드(교실별) - 화면에는 숨기고 전달만
+        joinCode: room.joinCode,
+        trainingState: room.trainingState,
         schoolId,
         schoolName,
-        schoolCode, // ✅ 학교코드 반드시 전달
+        schoolCode,
       },
     });
   };
@@ -218,10 +166,10 @@ function RoomList() {
     setNewRoomName("");
     setIsModalOpen(true);
   };
+
   const closeModal = () => setIsModalOpen(false);
 
   useEffect(() => {
-    fetchSchoolCodeOnce();
     fetchRooms();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schoolId]);
@@ -229,15 +177,11 @@ function RoomList() {
   return (
     <div className="min-h-screen bg-[#F5F5F5] flex justify-center items-start py-10">
       <div className="w-full max-w-3xl bg-white border border-green-500 rounded-3xl shadow-sm px-8 py-6 space-y-6">
-        {/* 학교 카드 */}
         <div className="w-full bg-white border border-green-500 rounded-3xl px-6 py-4 space-y-2">
           <h2 className="text-2xl font-bold">{schoolName}</h2>
 
           <div className="inline-flex items-center gap-2 bg-[#FBC02D] text-black font-bold px-5 py-3 rounded-2xl">
             <span>학교코드: {schoolCode}</span>
-            {schoolCodeLoading && (
-              <span className="text-sm font-normal">(조회중)</span>
-            )}
           </div>
 
           <p className="text-sm text-gray-500">
@@ -245,7 +189,6 @@ function RoomList() {
           </p>
         </div>
 
-        {/* 교실 목록 타이틀 + 버튼 */}
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-extrabold text-gray-800">교실 목록</h3>
           <button
@@ -258,7 +201,6 @@ function RoomList() {
           </button>
         </div>
 
-        {/* 방 리스트 박스 */}
         <div className="w-full border border-green-500 rounded-3xl px-6 py-4 space-y-4">
           {roomsLoading && (
             <p className="text-center text-gray-500 text-sm py-6">
@@ -276,6 +218,9 @@ function RoomList() {
                   <div className="text-xl font-bold mb-1">{room.className}</div>
                   <div className="text-sm text-gray-700">
                     학생 수 {room.studentCount}명
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    상태: {room.trainingState}
                   </div>
                 </div>
 
@@ -297,7 +242,6 @@ function RoomList() {
         </div>
       </div>
 
-      {/* 방 생성 팝업 */}
       {isModalOpen && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50">
           <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-xl">

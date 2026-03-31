@@ -2,8 +2,7 @@ import React, { useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 
-const API_BASE =
-  "https://disaster-ar-backend-a7bvfvd8f6bxbsfh.koreacentral-01.azurewebsites.net";
+const API_BASE = "https://disasterar.onenyang.shop";
 
 function JoinChannel() {
   const [code, setCode] = useState("");
@@ -35,7 +34,7 @@ function JoinChannel() {
           },
           timeout: 10000,
           validateStatus: () => true, // 4xx/5xx도 res로 받기
-        }
+        },
       );
 
       // 실패 처리
@@ -53,30 +52,27 @@ function JoinChannel() {
 
       const data = res.data || {};
 
-      // ✅ 백엔드 응답 키가 제각각일 수 있어서 후보를 넓게 잡음
-      const channelId =
-        data.id ?? data.channelId ?? data.schoolId ?? data.school_id ?? null;
+      const schoolId =
+        data.id ?? data.schoolId ?? data.channelId ?? data.school_id ?? null;
 
       const schoolName =
         data.schoolName ?? data.school_name ?? data.name ?? "학교";
 
-      // CreateChannel은 accessCode를 넘김 → Join도 동일하게 맞춤
-      const accessCode =
+      const schoolCode =
         data.accessCode ??
-        data.joinCode ??
         data.channelCode ??
+        data.joinCode ??
         channelCode ??
         "UNKNOWN";
 
-      // ✅ CreateChannel과 동일한 키로 state 전달
-      // (RoomList/SchoolChannel이 이 키들을 읽는 구조일 가능성이 높음)
       navigate("/room-list", {
         state: {
-          channelId,
+          schoolId,
+          channelId: schoolId, // 기존 코드 호환용
           schoolName,
-          accessCode,
-          // 혹시 기존 코드가 joinCode를 읽는 경우도 있으니 같이 넣어줌(안전)
-          joinCode: accessCode,
+          schoolCode,
+          accessCode: schoolCode, // 기존 코드 호환용
+          joinCode: schoolCode, // 기존 코드 호환용
         },
       });
     } catch (err) {

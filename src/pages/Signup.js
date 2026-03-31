@@ -2,8 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
-const API_BASE =
-  "https://disaster-ar-backend-a7bvfvd8f6bxbsfh.koreacentral-01.azurewebsites.net";
+const API_BASE = "https://disasterar.onenyang.shop";
 
 function Signup() {
   const [email, setEmail] = useState("");
@@ -53,7 +52,7 @@ function Signup() {
           timeout: 10000,
           // ✅ 4xx/5xx도 response로 들어오게 해서 상세 메시지 처리 가능하게 함
           validateStatus: () => true,
-        }
+        },
       );
 
       console.log("✅ SIGNUP RESPONSE:", res);
@@ -73,7 +72,7 @@ function Signup() {
       if (status === 400 || status === 422) {
         alert(
           `❌ 입력값 오류 (${status})\n\n` +
-            (data?.message || data?.detail || JSON.stringify(data, null, 2))
+            (data?.message || data?.detail || JSON.stringify(data, null, 2)),
         );
         return;
       }
@@ -88,7 +87,7 @@ function Signup() {
       if (status === 500) {
         alert(
           "🔥 서버 내부 오류 (500)\n\n" +
-            (typeof data === "string" ? data : JSON.stringify(data, null, 2))
+            (typeof data === "string" ? data : JSON.stringify(data, null, 2)),
         );
         return;
       }
@@ -97,7 +96,7 @@ function Signup() {
       alert(
         `❌ 회원가입 실패 (${status})\n\n서버 응답:\n${
           typeof data === "string" ? data : JSON.stringify(data, null, 2)
-        }`
+        }`,
       );
     } catch (err) {
       // 여기로 오는 경우는 보통 timeout/네트워크 끊김 같은 케이스
@@ -110,7 +109,7 @@ function Signup() {
 
       if (err.request) {
         alert(
-          "🌐 서버로부터 응답이 없습니다.\n\n서버가 다운되었거나 네트워크 문제가 있습니다."
+          "🌐 서버로부터 응답이 없습니다.\n\n서버가 다운되었거나 네트워크 문제가 있습니다.",
         );
         return;
       }

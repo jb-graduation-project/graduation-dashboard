@@ -3,8 +3,7 @@ import { useLocation } from "react-router-dom";
 import axios from "axios";
 import Navbar from "../components/Navbar";
 
-const API_BASE =
-  "https://disaster-ar-backend-a7bvfvd8f6bxbsfh.koreacentral-01.azurewebsites.net";
+const API_BASE = "https://disasterar.onenyang.shop";
 
 function SchoolChannel() {
   const location = useLocation();
@@ -26,10 +25,10 @@ function SchoolChannel() {
   const [joinCode, setJoinCode] = useState(initialJoinCode);
 
   const [className, setClassName] = useState(
-    location.state?.className || location.state?.roomName || "교실"
+    location.state?.className || location.state?.roomName || "교실",
   );
   const [studentCount, setStudentCount] = useState(
-    Number(location.state?.studentCount ?? 0)
+    Number(location.state?.studentCount ?? 0),
   );
 
   // 로컬 학생 리스트
@@ -40,7 +39,7 @@ function SchoolChannel() {
   const [editOpen, setEditOpen] = useState(false);
   const [editClassName, setEditClassName] = useState(className);
   const [editStudentCount, setEditStudentCount] = useState(
-    String(studentCount)
+    String(studentCount),
   );
 
   const authHeaders = useMemo(() => {
@@ -55,7 +54,7 @@ function SchoolChannel() {
       alert(
         `${title} (${resOrErr.status})\n\n${
           typeof data === "string" ? data : JSON.stringify(data, null, 2)
-        }`
+        }`,
       );
       return;
     }
@@ -78,7 +77,7 @@ function SchoolChannel() {
           params: { userId }, // ✅ Navbar처럼
           timeout: 10000,
           validateStatus: () => true,
-        }
+        },
       );
 
       if (!(res.status >= 200 && res.status < 300)) {
@@ -125,7 +124,7 @@ function SchoolChannel() {
           headers: { "Content-Type": "application/json", ...authHeaders },
           timeout: 10000,
           validateStatus: () => true,
-        }
+        },
       );
 
       if (!(res.status >= 200 && res.status < 300)) {
@@ -139,7 +138,7 @@ function SchoolChannel() {
       setStudentCount(
         typeof data.studentCount === "number"
           ? data.studentCount
-          : payload.studentCount
+          : payload.studentCount,
       );
       if (data.joinCode) setJoinCode(data.joinCode);
 
