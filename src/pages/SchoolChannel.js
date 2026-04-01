@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import Navbar from "../components/Navbar";
 
@@ -7,6 +7,7 @@ const API_BASE = "https://disasterar.onenyang.shop";
 
 function SchoolChannel() {
   const location = useLocation();
+  const navigate = useNavigate();
 
   const classroomId =
     location.state?.classroomId || location.state?.roomId || null;
@@ -20,7 +21,6 @@ function SchoolChannel() {
     }
   }, []);
 
-  // ✅ 처음에는 "이전에 발급받았던 값"을 보여주기
   const initialJoinCode = location.state?.joinCode || "UNKNOWN";
   const [joinCode, setJoinCode] = useState(initialJoinCode);
 
@@ -31,9 +31,9 @@ function SchoolChannel() {
     Number(location.state?.studentCount ?? 0),
   );
 
-  // 로컬 학생 리스트
+  // ✅ 로컬 입력 학생이 아니라 서버 조회 학생 목록
   const [students, setStudents] = useState([]);
-  const [newStudent, setNewStudent] = useState("");
+  const [studentLoading, setStudentLoading] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -48,7 +48,6 @@ function SchoolChannel() {
   }, []);
 
   const showError = (title, resOrErr) => {
-    // axios 응답(res)
     if (resOrErr?.status) {
       const data = resOrErr.data;
       alert(
@@ -58,9 +57,47 @@ function SchoolChannel() {
       );
       return;
     }
-    // axios 에러(err)
     alert(`${title}\n\n${resOrErr?.message || "알 수 없는 오류"}`);
   };
+
+  // ✅ 학생 목록 조회
+  const fetchStudents = useCallback(async () => {
+    if (!classroomId) {
+      setStudents([]);
+      return;
+    }
+
+    try {
+      setStudentLoading(true);
+
+      const res = await axios.get(
+        `${API_BASE}/api/rooms/${classroomId}/students`,
+        {
+          headers: { ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showError("학생 목록 조회 실패", res);
+        setStudents([]);
+        return;
+      }
+
+      const list = Array.isArray(res.data) ? res.data : [];
+      setStudents(list);
+
+      // ✅ 학생 수는 서버 목록 기준으로 맞춤
+      const activeCount = list.filter((s) => !s.isKicked).length;
+      setStudentCount(activeCount);
+    } catch (err) {
+      setStudents([]);
+      showError("학생 목록 조회 중 오류", err);
+    } finally {
+      setStudentLoading(false);
+    }
+  }, [classroomId, authHeaders]);
 
   const handleReissueJoinCode = async () => {
     if (!classroomId) return alert("classroomId가 없습니다.");
@@ -74,7 +111,7 @@ function SchoolChannel() {
         null,
         {
           headers: { ...authHeaders },
-          params: { userId }, // ✅ Navbar처럼
+          params: { userId },
           timeout: 10000,
           validateStatus: () => true,
         },
@@ -88,8 +125,9 @@ function SchoolChannel() {
       const data = res.data || {};
       if (data.joinCode) setJoinCode(data.joinCode);
       if (data.className) setClassName(data.className);
-      if (typeof data.studentCount === "number")
+      if (typeof data.studentCount === "number") {
         setStudentCount(data.studentCount);
+      }
 
       alert("✅ 입장 코드가 재발급되었습니다.");
     } catch (err) {
@@ -114,6 +152,7 @@ function SchoolChannel() {
       className: nextName,
       studentCount: Number.isFinite(nextCount) ? nextCount : 0,
     };
+
     try {
       setLoading(true);
 
@@ -132,7 +171,6 @@ function SchoolChannel() {
         return;
       }
 
-      // 응답 예시: { classroomId, schoolId, className, studentCount, joinCode }
       const data = res.data || {};
       setClassName(data.className ?? nextName);
       setStudentCount(
@@ -157,16 +195,75 @@ function SchoolChannel() {
     setEditOpen(true);
   };
 
-  // 로컬 학생 관리
-  const handleAddStudent = () => {
-    if (!newStudent.trim()) return;
-    setStudents((prev) => [...prev, newStudent.trim()]);
-    setNewStudent("");
+  // ✅ 학생 강퇴
+  const handleKickStudent = async (studentId) => {
+    if (!classroomId) return alert("classroomId가 없습니다.");
+    if (!studentId) return alert("studentId가 없습니다.");
+
+    const ok = window.confirm("이 학생을 강퇴하시겠습니까?");
+    if (!ok) return;
+
+    try {
+      setLoading(true);
+
+      const res = await axios.delete(
+        `${API_BASE}/api/rooms/${classroomId}/students/${studentId}`,
+        {
+          headers: { ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showError("학생 강퇴 실패", res);
+        return;
+      }
+
+      const data = res.data || {};
+      alert(data.message || "✅ 학생이 강퇴되었습니다.");
+
+      await fetchStudents();
+    } catch (err) {
+      showError("학생 강퇴 중 오류", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleRemoveStudent = (index) => {
-    setStudents((prev) => prev.filter((_, i) => i !== index));
+  // ✅ 게임 시작
+  const handleGameStart = async () => {
+    if (!classroomId) return alert("classroomId 없음");
+
+    try {
+      const res = await axios.get(
+        `${API_BASE}/api/rooms/${classroomId}/game-start-context`,
+        {
+          headers: { ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showError("게임 시작 데이터 조회 실패", res);
+        return;
+      }
+
+      const data = res.data || {};
+      localStorage.setItem("gameContext", JSON.stringify(data));
+
+      alert("게임 시작 데이터 로딩 완료!");
+      // navigate("/game", { state: data });
+    } catch (err) {
+      showError("게임 시작 실패", err);
+    }
   };
+
+  useEffect(() => {
+    if (!classroomId) return;
+    fetchStudents();
+  }, [classroomId, fetchStudents]);
 
   return (
     <div className="bg-[#F9FBE7] min-h-screen">
@@ -187,7 +284,7 @@ function SchoolChannel() {
                 </span>
               </div>
               <div className="text-sm text-gray-700 mt-1">
-                학생 수(설정): {studentCount}명
+                학생 수: {studentCount}명
               </div>
               {!userId && (
                 <div className="text-xs text-red-500 mt-1">
@@ -214,7 +311,15 @@ function SchoolChannel() {
               </button>
 
               <button
-                onClick={() => alert("훈련을 시작합니다!")}
+                onClick={fetchStudents}
+                disabled={studentLoading || !classroomId}
+                className="px-4 py-2 bg-[#26A69A] text-white rounded-lg shadow hover:bg-[#00897B] disabled:opacity-60"
+              >
+                {studentLoading ? "불러오는 중..." : "학생 새로고침"}
+              </button>
+
+              <button
+                onClick={handleGameStart}
                 className="px-4 py-2 bg-[#FBC02D] text-white font-bold rounded-lg shadow hover:bg-[#F9A825]"
               >
                 훈련 시작
@@ -224,39 +329,60 @@ function SchoolChannel() {
         </div>
 
         <div className="mb-6">
-          <h3 className="text-2xl font-bold text-[#2E7D32] mb-3">학생 입장</h3>
-          <div className="flex items-center mb-3">
-            <input
-              type="text"
-              placeholder="학생 이름 입력"
-              value={newStudent}
-              onChange={(e) => setNewStudent(e.target.value)}
-              className="px-3 py-2 border border-[#81C784] rounded-l-md w-64 focus:outline-none focus:ring-2 focus:ring-[#66BB6A]"
-            />
-            <button
-              onClick={handleAddStudent}
-              className="px-4 py-2 bg-[#81C784] text-white rounded-r-md hover:bg-[#2E7D32]"
-            >
-              추가
-            </button>
+          <h3 className="text-2xl font-bold text-[#2E7D32] mb-3">학생 목록</h3>
+
+          <div className="mb-3 text-sm text-gray-600">
+            학생이 입장 코드를 입력해 들어오면 이 목록에 자동으로 표시됩니다.
           </div>
 
-          <ul className="space-y-2">
-            {students.map((student, index) => (
-              <li
-                key={index}
-                className="flex items-center justify-between px-4 py-2 bg-white border-l-4 border-[#66BB6A] rounded-lg shadow"
-              >
-                <span className="text-[#2E7D32] font-medium">{student}</span>
-                <button
-                  onClick={() => handleRemoveStudent(index)}
-                  className="px-3 py-1 bg-[#F44336] text-white text-sm rounded hover:bg-[#C62828]"
+          {studentLoading ? (
+            <div className="bg-white rounded-xl p-4 shadow border border-[#C8E6C9] text-gray-600">
+              학생 목록 불러오는 중...
+            </div>
+          ) : students.length === 0 ? (
+            <div className="bg-white rounded-xl p-4 shadow border border-[#C8E6C9] text-gray-600">
+              아직 입장한 학생이 없습니다.
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {students.map((student) => (
+                <li
+                  key={student.studentId}
+                  className="flex items-center justify-between px-4 py-3 bg-white border-l-4 border-[#66BB6A] rounded-lg shadow"
                 >
-                  퇴출
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <div>
+                    <div className="text-[#2E7D32] font-semibold">
+                      {student.studentName || "이름 없음"}
+                    </div>
+                    <div className="text-sm text-gray-600 mt-1">
+                      상태: {student.status || "-"}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      입장 시각: {student.joinedAt || "-"}
+                    </div>
+                    {student.isKicked && (
+                      <div className="text-xs text-red-500 mt-1">
+                        강퇴된 학생
+                      </div>
+                    )}
+                  </div>
+
+                  {!student.isKicked ? (
+                    <button
+                      onClick={() => handleKickStudent(student.studentId)}
+                      className="px-3 py-1 bg-[#F44336] text-white text-sm rounded hover:bg-[#C62828]"
+                    >
+                      강퇴
+                    </button>
+                  ) : (
+                    <span className="px-3 py-1 bg-gray-200 text-gray-600 text-sm rounded">
+                      강퇴됨
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
 

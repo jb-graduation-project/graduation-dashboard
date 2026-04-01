@@ -101,6 +101,7 @@ function CreateChannel() {
 
   const handleCreate = async () => {
     const trimmed = schoolName.trim();
+
     if (!trimmed) return alert("학교 이름을 입력해 주세요.");
 
     // ✅ 층별 파일 1장 이상 있어야 함(원하면 “모든 층 필수”로 바꿀 수도 있음)
@@ -113,14 +114,11 @@ function CreateChannel() {
       const formData = new FormData();
       formData.append("schoolName", trimmed);
 
-      // ✅ 서버에 파일 + 층이름을 같은 순서로 전달
       picked.forEach((f) => {
-        formData.append("mapFile", f.file);
-        formData.append("floorName", (f.floorName || "").trim() || "층");
+        formData.append("mapImages", f.file);
       });
 
       const res = await axios.post(`${API_BASE}/api/channels`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
         timeout: 10000,
         validateStatus: () => true,
       });
@@ -136,10 +134,15 @@ function CreateChannel() {
       }
 
       const data = res.data || {};
+      console.log("🔥 create channel res.data =", data);
+      console.log("🔥 data.thumbnailImage =", data.thumbnailImage);
       if (!data.id) {
         alert(`id가 응답에 없습니다.\n\n${JSON.stringify(data, null, 2)}`);
         return;
       }
+
+      const firstPreviewImage =
+        floors.find((f) => f.previewUrl)?.previewUrl || "";
 
       navigate("/room-list", {
         state: {
@@ -148,6 +151,7 @@ function CreateChannel() {
           schoolName: data.schoolName ?? trimmed,
           schoolCode: data.accessCode ?? "UNKNOWN",
           accessCode: data.accessCode ?? "UNKNOWN",
+          thumbnailImage: data.thumbnailImage || firstPreviewImage,
         },
       });
     } catch (err) {

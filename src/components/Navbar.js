@@ -43,6 +43,8 @@ function Navbar() {
     { path: "/analysis", label: "분석 결과" },
   ];
 
+  console.log("🔥 SchoolSetting location.state:", location.state);
+
   // ✅ 방 삭제 (Swagger: DELETE /api/rooms/{classroomId}?userId=...)
   const handleDeleteRoom = async () => {
     if (!classroomId) {
@@ -90,6 +92,17 @@ function Navbar() {
       setDeleting(false);
     }
   };
+  const schoolId = useMemo(() => {
+    return (
+      location.state?.schoolId ||
+      location.state?.channelId ||
+      location.state?.id ||
+      null
+    );
+  }, [location.state]);
+
+  const schoolName = location.state?.schoolName || null;
+  const schoolCode = location.state?.schoolCode || null;
 
   return (
     <nav className="relative w-full h-20 flex items-center px-4 overflow-visible">
@@ -100,7 +113,18 @@ function Navbar() {
           return (
             <button
               key={item.path}
-              onClick={() => navigate(item.path, { state: location.state })}
+              onClick={() =>
+                navigate(item.path, {
+                  state: {
+                    ...location.state,
+                    classroomId,
+                    schoolId,
+                    schoolName,
+                    schoolCode,
+                    thumbnailImage: location.state?.thumbnailImage || null,
+                  },
+                })
+              }
               className={`px-4 py-2 rounded-full border border-green-600 font-semibold transition
                 ${
                   isActive

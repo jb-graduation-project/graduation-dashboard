@@ -1,5 +1,5 @@
 // pages/RoomList.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 
@@ -9,8 +9,6 @@ function RoomList() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const schoolName = location.state?.schoolName || "중부초등학교";
-
   const schoolId = useMemo(() => {
     return (
       location.state?.schoolId ||
@@ -19,6 +17,9 @@ function RoomList() {
       null
     );
   }, [location.state]);
+
+  const schoolName = location.state?.schoolName || "학교 이름 없음";
+  const thumbnailImage = location.state?.thumbnailImage || "";
 
   const userId = useMemo(() => {
     try {
@@ -34,7 +35,6 @@ function RoomList() {
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 
-  // schoolCode는 rooms API에 없어서 state 값 우선 사용
   const [schoolCode, setSchoolCode] = useState(
     location.state?.schoolCode ||
       location.state?.accessCode ||
@@ -48,7 +48,7 @@ function RoomList() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
 
-  const showAxiosError = (title, errOrRes) => {
+  const showAxiosError = useCallback((title, errOrRes) => {
     if (errOrRes?.status) {
       alert(
         `${title} (${errOrRes.status})\n\n${
@@ -60,9 +60,9 @@ function RoomList() {
       return;
     }
     alert(`${title}\n\n${errOrRes?.message || "알 수 없는 오류"}`);
-  };
+  }, []);
 
-  const fetchRooms = async () => {
+  const fetchRooms = useCallback(async () => {
     if (!schoolId) {
       setRooms([]);
       return;
@@ -102,7 +102,7 @@ function RoomList() {
     } finally {
       setRoomsLoading(false);
     }
-  };
+  }, [schoolId, authHeaders, showAxiosError]);
 
   const handleCreateRoom = async () => {
     const className = newRoomName.trim();
@@ -158,6 +158,7 @@ function RoomList() {
         schoolId,
         schoolName,
         schoolCode,
+        thumbnailImage,
       },
     });
   };
@@ -171,8 +172,28 @@ function RoomList() {
 
   useEffect(() => {
     fetchRooms();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schoolId]);
+  }, [fetchRooms]);
+
+  if (!schoolId) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F5] flex justify-center items-center">
+        <div className="bg-white border border-red-300 rounded-2xl px-8 py-6 shadow-sm text-center">
+          <h2 className="text-xl font-bold text-red-600 mb-2">
+            학교 정보가 없습니다
+          </h2>
+          <p className="text-gray-600 mb-4">
+            정상적인 경로로 다시 접속해 주세요.
+          </p>
+          <button
+            onClick={() => navigate(-1)}
+            className="px-5 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700"
+          >
+            이전 화면으로
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F5F5F5] flex justify-center items-start py-10">

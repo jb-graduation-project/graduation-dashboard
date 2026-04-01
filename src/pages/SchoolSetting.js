@@ -12,12 +12,6 @@ import { useLocation } from "react-router-dom";
 
 const API_BASE = "https://disasterar.onenyang.shop";
 
-const DEFAULT_FLOOR_JSONS = [
-  { name: "1층", url: "/school-setting-1층.json", img: "/img/1층.png" },
-  { name: "2층", url: "/school-setting-2층.json", img: "/img/2층.png" },
-  { name: "3층", url: "/school-setting-3층.json", img: "/img/3층.png" },
-];
-
 export default function SchoolSetting() {
   const location = useLocation();
 
@@ -39,6 +33,10 @@ export default function SchoolSetting() {
     );
   }, [location.state]);
 
+  const thumbnailImage = useMemo(() => {
+    return location.state?.thumbnailImage || null;
+  }, [location.state]);
+
   const userId = useMemo(() => {
     try {
       const user = JSON.parse(localStorage.getItem("user") || "null");
@@ -47,7 +45,9 @@ export default function SchoolSetting() {
       return null;
     }
   }, []);
-
+  console.log("SchoolSetting location.state =", location.state);
+  console.log("SchoolSetting classroomId =", classroomId);
+  console.log("SchoolSetting schoolId =", schoolId);
   const authHeaders = useMemo(() => {
     const token = localStorage.getItem("token");
     return token ? { Authorization: `Bearer ${token}` } : {};
@@ -83,15 +83,22 @@ export default function SchoolSetting() {
   const analyzeRunIdRef = useRef(0);
 
   const toPublicImg = (raw) => {
-    const FALLBACK = "/img/1층.png";
-    if (!raw || typeof raw !== "string") return FALLBACK;
+    if (!raw || typeof raw !== "string") return null;
 
     const s = raw.trim();
-    if (s.startsWith("blob:") || s.startsWith("data:")) return FALLBACK;
+    if (!s) return null;
 
-    const name = s.split(/[/\\]/).pop(); // "2층.png" 같은 파일명만
-    const path = name ? `/img/${name}` : FALLBACK;
-    return encodeURI(path);
+    // 이미 완전한 URL이면 그대로 사용
+    if (s.startsWith("http://") || s.startsWith("https://")) {
+      return s;
+    }
+
+    // 서버 상대경로면 API_BASE 붙이기
+    if (s.startsWith("/")) {
+      return `${API_BASE}${s}`;
+    }
+
+    return `${API_BASE}/${s}`;
   };
   const planPreviewRef = useRef(null);
   const [planPreviewW, setPlanPreviewW] = useState(0);
@@ -403,12 +410,14 @@ export default function SchoolSetting() {
     try {
       setBeaconLoading(true);
 
-      const res = await axios.get(`${API_BASE}/api/beacons`, {
-        params: { schoolId },
-        headers: { ...authHeaders },
-        timeout: 10000,
-        validateStatus: () => true,
-      });
+      const res = await axios.get(
+        `${API_BASE}/api/rooms/${classroomId}/map-versions`,
+        {
+          headers: { ...authHeaders },
+          timeout: 30000,
+          validateStatus: () => true,
+        },
+      );
 
       if (!(res.status >= 200 && res.status < 300)) {
         setBeaconList([]);
@@ -645,7 +654,7 @@ export default function SchoolSetting() {
     return floors.map((f, idx) => ({
       name: floorNames[idx] || `${idx + 1}층`,
       image: {
-        src: f.imageSrc || "/img/1층.png",
+        src: f.imageSrc || null,
         natural: f.imgNatural || { w: 0, h: 0 },
       },
       elements: (f.elements || []).map((el) => ({
@@ -735,14 +744,93 @@ export default function SchoolSetting() {
       console.error(err);
     }
   }, [classroomId, authHeaders]);
+  const fetchSchoolMaps = useCallback(async () => {
+    if (!schoolId) return;
+
+    try {
+      const res = await axios.get(`${API_BASE}/api/channels/${schoolId}/maps`, {
+        headers: { ...authHeaders },
+        timeout: 30000,
+        validateStatus: () => true,
+      });
+      console.log("🔥 maps 응답:", res.data);
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("학교 구조도 조회 실패", res);
+        return;
+      }
+
+      const list = Array.isArray(res.data) ? res.data : [];
+      console.log("school maps res.data =", list);
+
+      if (list.length === 0) {
+        setFloorNames(["1층"]);
+        setFloors([
+          {
+            ...makeEmptyFloor(),
+            imageSrc: toPublicImg(thumbnailImage),
+          },
+        ]);
+        setCurrentFloorIndex(0);
+        return;
+      }
+
+      const sorted = [...list].sort(
+        (a, b) => (a.floorIndex ?? 0) - (b.floorIndex ?? 0),
+      );
+
+      setFloorNames(
+        sorted.map(
+          (m, idx) => m.floorLabel || `${(m.floorIndex ?? idx) + 1}층`,
+        ),
+      );
+      console.log(
+        "🔥 최종 imageSrc 목록:",
+        sorted.map((m) =>
+          toPublicImg(m.uploadedImage || m.thumbnailImage || thumbnailImage),
+        ),
+      );
+      setFloors(
+        sorted.map((m, idx) => {
+          let parsedElements = [];
+          try {
+            parsedElements = m.elementsJson ? JSON.parse(m.elementsJson) : [];
+          } catch {
+            parsedElements = [];
+          }
+
+          return {
+            imageSrc: toPublicImg(
+              m.uploadedImage || m.thumbnailImage || thumbnailImage,
+            ),
+            uploadedFile: null,
+            imgNatural: { w: 0, h: 0 },
+            elements: Array.isArray(parsedElements)
+              ? parsedElements.map((el) => ({ ...el, floor: idx }))
+              : [],
+            undoStack: [],
+            redoStack: [],
+            hasAutoAnalysisResult: false,
+            autoElementsCache: [],
+            autoAnalysisHidden: false,
+            abort: { analyze: null },
+          };
+        }),
+      );
+
+      setCurrentFloorIndex(0);
+    } catch (err) {
+      console.error(err);
+      showAxiosError("학교 구조도 조회 중 오류", err);
+    }
+  }, [schoolId, authHeaders, showAxiosError, makeEmptyFloor, thumbnailImage]);
 
   useEffect(() => {
-    if (!classroomId) return;
+    if (!schoolId) return;
 
-    fetchMapVersions();
-    fetchActiveMap();
     fetchBeacons();
-  }, [classroomId, fetchMapVersions, fetchActiveMap, fetchBeacons]);
+    fetchSchoolMaps();
+  }, [schoolId, fetchBeacons, fetchSchoolMaps]);
 
   // ====== Save plan to list ======
   const saveCurrentPlanToList = useCallback(() => {
@@ -756,7 +844,7 @@ export default function SchoolSetting() {
       floors: floors.map((f, idx) => ({
         name: floorNames[idx] || `${idx + 1}층`,
         image: {
-          src: f.imageSrc || "/img/1층.png",
+          src: f.imageSrc || null,
           natural: f.imgNatural || { w: 0, h: 0 },
         },
         elements: (f.elements || []).map((el) => ({ ...el, floor: idx })),
@@ -835,6 +923,46 @@ export default function SchoolSetting() {
     },
     [imgNatural.h, imgNatural.w],
   );
+  const setActiveMapToServer = useCallback(
+    async (mapVersionId) => {
+      if (!classroomId || !mapVersionId) {
+        alert("활성화할 mapVersionId가 없습니다.");
+        return;
+      }
+
+      try {
+        const res = await axios.put(
+          `${API_BASE}/api/rooms/${classroomId}/active-map`,
+          { mapVersionId },
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("활성 맵 설정 실패", res);
+          return;
+        }
+
+        setActiveMapVersionId(mapVersionId);
+        alert("✅ 활성 맵이 변경되었습니다.");
+        await fetchMapVersions();
+        await fetchActiveMap();
+      } catch (err) {
+        console.error(err);
+        showAxiosError("활성 맵 설정 중 오류", err);
+      }
+    },
+    [
+      classroomId,
+      authHeaders,
+      showAxiosError,
+      fetchMapVersions,
+      fetchActiveMap,
+    ],
+  );
   const saveMapVersionToServer = useCallback(async () => {
     if (!classroomId) {
       alert("classroomId가 없습니다.");
@@ -872,8 +1000,15 @@ export default function SchoolSetting() {
         return;
       }
 
+      const saved = res.data || {};
+      const newMapVersionId = saved.mapVersionId;
+
       alert("✅ 맵 버전이 저장되었습니다.");
       await fetchMapVersions();
+
+      if (newMapVersionId) {
+        await setActiveMapToServer(newMapVersionId);
+      }
     } catch (err) {
       console.error(err);
       showAxiosError("맵 버전 저장 중 오류", err);
@@ -886,6 +1021,8 @@ export default function SchoolSetting() {
     authHeaders,
     showAxiosError,
     fetchMapVersions,
+    setActiveMapToServer,
+    fetchActiveMap,
   ]);
 
   const applyZoomAroundPoint = useCallback(
@@ -2125,39 +2262,7 @@ export default function SchoolSetting() {
       fetchMapVersions,
     ],
   );
-  const setActiveMapToServer = useCallback(
-    async (mapVersionId) => {
-      if (!classroomId || !mapVersionId) {
-        alert("활성화할 mapVersionId가 없습니다.");
-        return;
-      }
 
-      try {
-        const res = await axios.put(
-          `${API_BASE}/api/rooms/${classroomId}/active-map`,
-          { mapVersionId },
-          {
-            headers: { "Content-Type": "application/json", ...authHeaders },
-            timeout: 10000,
-            validateStatus: () => true,
-          },
-        );
-
-        if (!(res.status >= 200 && res.status < 300)) {
-          showAxiosError("활성 맵 설정 실패", res);
-          return;
-        }
-
-        setActiveMapVersionId(mapVersionId);
-        alert("✅ 활성 맵이 변경되었습니다.");
-        await fetchMapVersions();
-      } catch (err) {
-        console.error(err);
-        showAxiosError("활성 맵 설정 중 오류", err);
-      }
-    },
-    [classroomId, authHeaders, showAxiosError, fetchMapVersions],
-  );
   const loadMapVersionDetail = useCallback(
     async (mapVersionId) => {
       if (!classroomId || !mapVersionId) return;
@@ -2323,7 +2428,10 @@ export default function SchoolSetting() {
           <div className="flex flex-wrap gap-3 items-center justify-between">
             <div className="flex flex-wrap gap-3 items-center">
               <button
-                onClick={() => setIsPlanModalOpen(true)}
+                onClick={async () => {
+                  await fetchMapVersions();
+                  setIsPlanModalOpen(true);
+                }}
                 className={btnGray}
               >
                 구조도 목록
@@ -2524,7 +2632,13 @@ export default function SchoolSetting() {
               <img
                 src={imageSrc}
                 alt="floorplan"
-                onLoad={onImgLoad}
+                onLoad={(e) => {
+                  console.log("✅ 이미지 로드 성공:", imageSrc);
+                  onImgLoad(e);
+                }}
+                onError={(e) => {
+                  console.error("❌ 이미지 로드 실패:", imageSrc, e);
+                }}
                 draggable={false}
                 style={{
                   position: "absolute",
