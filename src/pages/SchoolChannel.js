@@ -27,11 +27,11 @@ function SchoolChannel() {
   const [className, setClassName] = useState(
     location.state?.className || location.state?.roomName || "교실",
   );
+
   const [studentCount, setStudentCount] = useState(
     Number(location.state?.studentCount ?? 0),
   );
 
-  // ✅ 로컬 입력 학생이 아니라 서버 조회 학생 목록
   const [students, setStudents] = useState([]);
   const [studentLoading, setStudentLoading] = useState(false);
 
@@ -41,6 +41,15 @@ function SchoolChannel() {
   const [editStudentCount, setEditStudentCount] = useState(
     String(studentCount),
   );
+
+  // game-start-context / training 상태 표시용
+  const [gameContext, setGameContext] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("gameContext") || "null");
+    } catch {
+      return null;
+    }
+  });
 
   const authHeaders = useMemo(() => {
     const token = localStorage.getItem("token");
@@ -60,10 +69,25 @@ function SchoolChannel() {
     alert(`${title}\n\n${resOrErr?.message || "알 수 없는 오류"}`);
   };
 
-  // ✅ 학생 목록 조회
+  const getIsoNow = () => new Date().toISOString();
+
+  const getStoredGameContext = () => {
+    try {
+      return JSON.parse(localStorage.getItem("gameContext") || "{}");
+    } catch {
+      return {};
+    }
+  };
+
+  const saveGameContext = (data) => {
+    localStorage.setItem("gameContext", JSON.stringify(data));
+    setGameContext(data);
+  };
+
   const fetchStudents = useCallback(async () => {
     if (!classroomId) {
       setStudents([]);
+      setStudentCount(0);
       return;
     }
 
@@ -82,20 +106,51 @@ function SchoolChannel() {
       if (!(res.status >= 200 && res.status < 300)) {
         showError("학생 목록 조회 실패", res);
         setStudents([]);
+        setStudentCount(0);
         return;
       }
 
       const list = Array.isArray(res.data) ? res.data : [];
-      setStudents(list);
+      const visibleList = list.filter((s) => !s.isKicked);
 
-      // ✅ 학생 수는 서버 목록 기준으로 맞춤
-      const activeCount = list.filter((s) => !s.isKicked).length;
-      setStudentCount(activeCount);
+      setStudents(visibleList);
+      setStudentCount(visibleList.length);
     } catch (err) {
       setStudents([]);
+      setStudentCount(0);
       showError("학생 목록 조회 중 오류", err);
     } finally {
       setStudentLoading(false);
+    }
+  }, [classroomId, authHeaders]);
+
+  const fetchGameStartContext = useCallback(async () => {
+    if (!classroomId) {
+      alert("classroomId 없음");
+      return null;
+    }
+
+    try {
+      const res = await axios.get(
+        `${API_BASE}/api/rooms/${classroomId}/game-start-context`,
+        {
+          headers: { ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showError("게임 시작 데이터 조회 실패", res);
+        return null;
+      }
+
+      const data = res.data || {};
+      saveGameContext(data);
+      return data;
+    } catch (err) {
+      showError("게임 시작 데이터 조회 중 오류", err);
+      return null;
     }
   }, [classroomId, authHeaders]);
 
@@ -195,7 +250,6 @@ function SchoolChannel() {
     setEditOpen(true);
   };
 
-  // ✅ 학생 강퇴
   const handleKickStudent = async (studentId) => {
     if (!classroomId) return alert("classroomId가 없습니다.");
     if (!studentId) return alert("studentId가 없습니다.");
@@ -223,7 +277,11 @@ function SchoolChannel() {
       const data = res.data || {};
       alert(data.message || "✅ 학생이 강퇴되었습니다.");
 
-      await fetchStudents();
+      setStudents((prev) => {
+        const next = prev.filter((s) => s.studentId !== studentId);
+        setStudentCount(next.length);
+        return next;
+      });
     } catch (err) {
       showError("학생 강퇴 중 오류", err);
     } finally {
@@ -231,32 +289,130 @@ function SchoolChannel() {
     }
   };
 
-  // ✅ 게임 시작
-  const handleGameStart = async () => {
-    if (!classroomId) return alert("classroomId 없음");
+  const handleTrainingStart = async (contextData = null) => {
+    if (!classroomId) {
+      alert("classroomId 없음");
+      return false;
+    }
+
+    const stored = contextData || getStoredGameContext();
+    const scenarioId = stored?.scenarioId || stored?.activeScenarioId || null;
+    const startedAt = getIsoNow();
+
+    const payload = {
+      classroomId: String(classroomId),
+      trainingState: "IN_PROGRESS",
+      trainingStartedAt: startedAt,
+      trainingEndedAt: null,
+      activeScenarioId: scenarioId,
+    };
 
     try {
-      const res = await axios.get(
-        `${API_BASE}/api/rooms/${classroomId}/game-start-context`,
+      const res = await axios.post(
+        `${API_BASE}/api/rooms/${classroomId}/training/start`,
+        payload,
         {
-          headers: { ...authHeaders },
+          headers: { "Content-Type": "application/json", ...authHeaders },
           timeout: 10000,
           validateStatus: () => true,
         },
       );
 
       if (!(res.status >= 200 && res.status < 300)) {
-        showError("게임 시작 데이터 조회 실패", res);
+        showError("훈련 시작 상태 저장 실패", res);
+        return false;
+      }
+
+      const nextContext = {
+        ...stored,
+        classroomId: stored?.classroomId || String(classroomId),
+        scenarioId: stored?.scenarioId || scenarioId,
+        trainingState: res.data?.trainingState || "IN_PROGRESS",
+        trainingStartedAt: res.data?.trainingStartedAt || startedAt,
+        trainingEndedAt: res.data?.trainingEndedAt || null,
+        activeScenarioId: res.data?.activeScenarioId || scenarioId,
+      };
+
+      saveGameContext(nextContext);
+      return true;
+    } catch (err) {
+      showError("훈련 시작 상태 저장 중 오류", err);
+      return false;
+    }
+  };
+
+  const handleTrainingEnd = async () => {
+    if (!classroomId) {
+      alert("classroomId 없음");
+      return;
+    }
+
+    const stored = getStoredGameContext();
+    const scenarioId = stored?.scenarioId || stored?.activeScenarioId || null;
+    const endedAt = getIsoNow();
+
+    const payload = {
+      classroomId: String(classroomId),
+      trainingState: "ENDED",
+      trainingStartedAt: stored?.trainingStartedAt || null,
+      trainingEndedAt: endedAt,
+      activeScenarioId: scenarioId,
+    };
+
+    try {
+      setLoading(true);
+
+      const res = await axios.post(
+        `${API_BASE}/api/rooms/${classroomId}/training/end`,
+        payload,
+        {
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showError("훈련 종료 상태 저장 실패", res);
         return;
       }
 
-      const data = res.data || {};
-      localStorage.setItem("gameContext", JSON.stringify(data));
+      const nextContext = {
+        ...stored,
+        trainingState: res.data?.trainingState || "ENDED",
+        trainingStartedAt:
+          res.data?.trainingStartedAt || stored?.trainingStartedAt || null,
+        trainingEndedAt: res.data?.trainingEndedAt || endedAt,
+        activeScenarioId: res.data?.activeScenarioId || scenarioId,
+      };
+
+      saveGameContext(nextContext);
+      alert("✅ 훈련이 종료되었습니다.");
+    } catch (err) {
+      showError("훈련 종료 상태 저장 중 오류", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGameStart = async () => {
+    if (!classroomId) return alert("classroomId 없음");
+
+    try {
+      setLoading(true);
+
+      const context = await fetchGameStartContext();
+      if (!context) return;
+
+      const started = await handleTrainingStart(context);
+      if (!started) return;
 
       alert("게임 시작 데이터 로딩 완료!");
-      // navigate("/game", { state: data });
+      // navigate("/game", { state: context });
     } catch (err) {
       showError("게임 시작 실패", err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -312,7 +468,7 @@ function SchoolChannel() {
 
               <button
                 onClick={fetchStudents}
-                disabled={studentLoading || !classroomId}
+                disabled={studentLoading || loading || !classroomId}
                 className="px-4 py-2 bg-[#26A69A] text-white rounded-lg shadow hover:bg-[#00897B] disabled:opacity-60"
               >
                 {studentLoading ? "불러오는 중..." : "학생 새로고침"}
@@ -320,13 +476,73 @@ function SchoolChannel() {
 
               <button
                 onClick={handleGameStart}
-                className="px-4 py-2 bg-[#FBC02D] text-white font-bold rounded-lg shadow hover:bg-[#F9A825]"
+                disabled={loading || !classroomId}
+                className="px-4 py-2 bg-[#FBC02D] text-white font-bold rounded-lg shadow hover:bg-[#F9A825] disabled:opacity-60"
               >
-                훈련 시작
+                {loading ? "처리 중..." : "훈련 시작"}
+              </button>
+
+              <button
+                onClick={handleTrainingEnd}
+                disabled={loading || !classroomId}
+                className="px-4 py-2 bg-red-500 text-white font-bold rounded-lg shadow hover:bg-red-600 disabled:opacity-60"
+              >
+                훈련 종료
               </button>
             </div>
           </div>
         </div>
+
+        {gameContext && (
+          <div className="mb-6 bg-white rounded-2xl p-5 shadow border border-[#C8E6C9]">
+            <h3 className="text-xl font-bold text-[#2E7D32] mb-3">
+              게임 시작 정보
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-700">
+              <div>
+                <span className="font-semibold">classroomId:</span>{" "}
+                {gameContext.classroomId || "-"}
+              </div>
+              <div>
+                <span className="font-semibold">scenarioId:</span>{" "}
+                {gameContext.scenarioId || gameContext.activeScenarioId || "-"}
+              </div>
+              <div>
+                <span className="font-semibold">scenarioType:</span>{" "}
+                {gameContext.scenarioType || "-"}
+              </div>
+              <div>
+                <span className="font-semibold">trainingState:</span>{" "}
+                {gameContext.trainingState || "-"}
+              </div>
+              <div>
+                <span className="font-semibold">trainingStartedAt:</span>{" "}
+                {gameContext.trainingStartedAt || "-"}
+              </div>
+              <div>
+                <span className="font-semibold">trainingEndedAt:</span>{" "}
+                {gameContext.trainingEndedAt || "-"}
+              </div>
+              <div>
+                <span className="font-semibold">activeMapVersionId:</span>{" "}
+                {gameContext.activeMapVersionId || "-"}
+              </div>
+              <div>
+                <span className="font-semibold">floorsJson:</span>{" "}
+                {gameContext.floorsJson ? "있음" : "-"}
+              </div>
+              <div>
+                <span className="font-semibold">npcPositionsJson:</span>{" "}
+                {gameContext.npcPositionsJson ? "있음" : "-"}
+              </div>
+              <div>
+                <span className="font-semibold">teamAssignmentJson:</span>{" "}
+                {gameContext.teamAssignmentJson ? "있음" : "-"}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="mb-6">
           <h3 className="text-2xl font-bold text-[#2E7D32] mb-3">학생 목록</h3>
@@ -357,28 +573,14 @@ function SchoolChannel() {
                     <div className="text-sm text-gray-600 mt-1">
                       상태: {student.status || "-"}
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      입장 시각: {student.joinedAt || "-"}
-                    </div>
-                    {student.isKicked && (
-                      <div className="text-xs text-red-500 mt-1">
-                        강퇴된 학생
-                      </div>
-                    )}
                   </div>
 
-                  {!student.isKicked ? (
-                    <button
-                      onClick={() => handleKickStudent(student.studentId)}
-                      className="px-3 py-1 bg-[#F44336] text-white text-sm rounded hover:bg-[#C62828]"
-                    >
-                      강퇴
-                    </button>
-                  ) : (
-                    <span className="px-3 py-1 bg-gray-200 text-gray-600 text-sm rounded">
-                      강퇴됨
-                    </span>
-                  )}
+                  <button
+                    onClick={() => handleKickStudent(student.studentId)}
+                    className="px-3 py-1 bg-[#F44336] text-white text-sm rounded hover:bg-[#C62828]"
+                  >
+                    강퇴
+                  </button>
                 </li>
               ))}
             </ul>
