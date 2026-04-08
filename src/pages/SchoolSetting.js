@@ -78,7 +78,6 @@ export default function SchoolSetting() {
 
   // 구조도(플랜) 모달
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
-  const [savedPlans, setSavedPlans] = useState([]);
 
   const analyzeRunIdRef = useRef(0);
 
@@ -103,25 +102,6 @@ export default function SchoolSetting() {
   const planPreviewRef = useRef(null);
   const [planPreviewW, setPlanPreviewW] = useState(0);
 
-  useEffect(() => {
-    if (!isPlanModalOpen) return;
-    const el = planPreviewRef.current;
-    if (!el) return;
-
-    const ro = new ResizeObserver(() => {
-      setPlanPreviewW(el.clientWidth || 0);
-    });
-    ro.observe(el);
-    setPlanPreviewW(el.clientWidth || 0);
-
-    return () => ro.disconnect();
-  }, [isPlanModalOpen]);
-
-  // ====== Helpers ======
-  const clamp = useCallback((v, a, b) => Math.max(a, Math.min(b, v)), []);
-  const round4 = (n) =>
-    typeof n === "number" ? Math.round(n * 10000) / 10000 : n;
-
   const showAxiosError = useCallback((title, errOrRes) => {
     if (errOrRes?.status) {
       alert(
@@ -136,6 +116,69 @@ export default function SchoolSetting() {
 
     alert(`${title}\n\n${errOrRes?.message || "알 수 없는 오류"}`);
   }, []);
+
+  const fetchMapVersions = useCallback(async () => {
+    if (!classroomId) {
+      setMapVersions([]);
+      return;
+    }
+
+    try {
+      setMapLoading(true);
+
+      const res = await axios.get(
+        `${API_BASE}/api/rooms/${classroomId}/map-versions`,
+        {
+          headers: { ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        setMapVersions([]);
+        showAxiosError("맵 버전 목록 조회 실패", res);
+        return;
+      }
+
+      const list = Array.isArray(res.data) ? res.data : [];
+      setMapVersions(list);
+    } catch (err) {
+      console.error(err);
+      setMapVersions([]);
+      showAxiosError("맵 버전 목록 조회 중 오류", err);
+    } finally {
+      setMapLoading(false);
+    }
+  }, [classroomId, authHeaders, showAxiosError]);
+
+  useEffect(() => {
+    if (!isPlanModalOpen) return;
+
+    fetchMapVersions();
+
+    const el = planPreviewRef.current;
+    if (!el) return;
+
+    const ro = new ResizeObserver(() => {
+      setPlanPreviewW(el.clientWidth || 0);
+    });
+    ro.observe(el);
+    setPlanPreviewW(el.clientWidth || 0);
+
+    return () => ro.disconnect();
+  }, [isPlanModalOpen, fetchMapVersions]);
+
+  useEffect(() => {
+    if (isPlanModalOpen) {
+      fetchMapVersions();
+    }
+  }, [isPlanModalOpen, fetchMapVersions]);
+
+  // ====== Helpers ======
+  const clamp = useCallback((v, a, b) => Math.max(a, Math.min(b, v)), []);
+  const round4 = (n) =>
+    typeof n === "number" ? Math.round(n * 10000) / 10000 : n;
 
   function typeColor(type, alpha = 0.25) {
     switch (type) {
@@ -372,12 +415,41 @@ export default function SchoolSetting() {
 
   const [selectedPlanId, setSelectedPlanId] = useState(null);
   const [planFloorIdx, setPlanFloorIdx] = useState(0);
+  const [selectedPlanDetail, setSelectedPlanDetail] = useState(null);
 
   const selectedPlan = useMemo(
-    () => savedPlans.find((p) => p.id === selectedPlanId) || null,
-    [savedPlans, selectedPlanId],
+    () => mapVersions.find((mv) => mv.mapVersionId === selectedPlanId) || null,
+    [mapVersions, selectedPlanId],
   );
 
+  const selectedPlanFloors = useMemo(() => {
+    const floorsJson = selectedPlanDetail?.floorsJson || null;
+    if (!floorsJson) return [];
+
+    try {
+      const parsed = JSON.parse(floorsJson);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+      console.error("selectedPlan floorsJson parse 실패 =", err, floorsJson);
+      return [];
+    }
+  }, [selectedPlanDetail]);
+
+  const previewFloor =
+    selectedPlanFloors[planFloorIdx] || selectedPlanFloors[0] || null;
+
+  useEffect(() => {
+    if (!isPlanModalOpen) return;
+    if (!mapVersions.length) return;
+
+    const exists = mapVersions.some((mv) => mv.mapVersionId === selectedPlanId);
+    if (!exists) {
+      setSelectedPlanId(
+        activeMapVersionId || mapVersions[0]?.mapVersionId || null,
+      );
+      setPlanFloorIdx(0);
+    }
+  }, [isPlanModalOpen, mapVersions, selectedPlanId, activeMapVersionId]);
   // Beacon UI tuning
   const BEACON_SIZE = 28; // 자연좌표 기준 비콘 원 크기
   const BEACON_FONT_MIN = 14; // 숫자 최소 폰트
@@ -410,14 +482,14 @@ export default function SchoolSetting() {
     try {
       setBeaconLoading(true);
 
-      const res = await axios.get(
-        `${API_BASE}/api/rooms/${classroomId}/map-versions`,
-        {
-          headers: { ...authHeaders },
-          timeout: 30000,
-          validateStatus: () => true,
-        },
-      );
+      const res = await axios.get(`${API_BASE}/api/beacons`, {
+        params: { schoolId },
+        headers: { ...authHeaders },
+        timeout: 30000,
+        validateStatus: () => true,
+      });
+
+      console.log("비콘 목록 조회 응답 =", res.status, res.data);
 
       if (!(res.status >= 200 && res.status < 300)) {
         setBeaconList([]);
@@ -443,15 +515,15 @@ export default function SchoolSetting() {
       }
 
       const payload = {
-        schoolId,
-        floorIndex,
-        uuid,
-        major,
-        minor,
-        beaconNo,
+        schoolId: String(schoolId),
+        floorIndex: Number(floorIndex),
+        uuid: String(uuid).trim(),
+        major: Number(major),
+        minor: Number(minor),
+        beaconNo: Number(beaconNo),
         mac: "",
-        x,
-        y,
+        x: Number(x),
+        y: Number(y),
         realXM: 0,
         realYM: 0,
         realZM: 0,
@@ -459,11 +531,26 @@ export default function SchoolSetting() {
         txPower: 0,
       };
 
+      console.log("=== 비콘 등록 payload ===");
+      console.log(JSON.stringify(payload, null, 2));
+      console.log("payload.schoolId =", payload.schoolId);
+      console.log("payload.floorIndex =", payload.floorIndex);
+      console.log("payload.uuid =", payload.uuid);
+      console.log("payload.major =", payload.major);
+      console.log("payload.minor =", payload.minor);
+      console.log("payload.beaconNo =", payload.beaconNo);
+      console.log("payload.x =", payload.x);
+      console.log("payload.y =", payload.y);
+
       const res = await axios.post(`${API_BASE}/api/beacons`, payload, {
         headers: { "Content-Type": "application/json", ...authHeaders },
         timeout: 10000,
         validateStatus: () => true,
       });
+
+      console.log("=== 비콘 등록 응답 ===");
+      console.log("status =", res.status);
+      console.log("data =", res.data);
 
       if (!(res.status >= 200 && res.status < 300)) {
         showAxiosError("비콘 등록 실패", res);
@@ -476,6 +563,9 @@ export default function SchoolSetting() {
   );
   const updateBeaconOnServer = useCallback(
     async (beaconId, payload) => {
+      console.log("비콘 수정 beaconId =", beaconId);
+      console.log("비콘 수정 payload =", payload);
+
       const res = await axios.put(
         `${API_BASE}/api/beacons/${beaconId}`,
         payload,
@@ -485,6 +575,8 @@ export default function SchoolSetting() {
           validateStatus: () => true,
         },
       );
+
+      console.log("비콘 수정 응답 =", res.status, res.data);
 
       if (!(res.status >= 200 && res.status < 300)) {
         showAxiosError("비콘 수정 실패", res);
@@ -497,11 +589,15 @@ export default function SchoolSetting() {
   );
   const deleteBeaconOnServer = useCallback(
     async (beaconId) => {
+      console.log("비콘 삭제 beaconId =", beaconId);
+
       const res = await axios.delete(`${API_BASE}/api/beacons/${beaconId}`, {
         headers: { ...authHeaders },
         timeout: 10000,
         validateStatus: () => true,
       });
+
+      console.log("비콘 삭제 응답 =", res.status, res.data);
 
       if (!(res.status >= 200 && res.status < 300)) {
         showAxiosError("비콘 삭제 실패", res);
@@ -574,8 +670,16 @@ export default function SchoolSetting() {
           };
         }),
       );
-
+      const currentMap = await fetchSingleMap(/* 현재 층 mapId */);
+      if (currentMap?.mapId) {
+        await updateMapToServer(currentMap.mapId, floorIdx);
+      }
       await fetchBeacons();
+
+      const mapId = floors[floorIdx]?.mapId;
+      if (mapId) {
+        await updateMapToServer(mapId, floorIdx);
+      }
 
       setIsBeaconModalOpen(false);
       setPendingBeaconNat(null);
@@ -621,7 +725,10 @@ export default function SchoolSetting() {
     setElements((prev) => [...prev, newBeacon]);
     setSelectedId(id);
     setSelectedIds([id]);
-
+    const currentMap = await fetchSingleMap(/* 현재 층 mapId */);
+    if (currentMap?.mapId) {
+      await updateMapToServer(currentMap.mapId, floorIdx);
+    }
     await fetchBeacons();
 
     setIsBeaconModalOpen(false);
@@ -664,40 +771,6 @@ export default function SchoolSetting() {
     }));
   }, [floors, floorNames]);
 
-  const fetchMapVersions = useCallback(async () => {
-    if (!classroomId) {
-      setMapVersions([]);
-      return;
-    }
-
-    try {
-      setMapLoading(true);
-
-      const res = await axios.get(
-        `${API_BASE}/api/rooms/${classroomId}/map-versions`,
-        {
-          headers: { ...authHeaders },
-          timeout: 10000,
-          validateStatus: () => true,
-        },
-      );
-
-      if (!(res.status >= 200 && res.status < 300)) {
-        setMapVersions([]);
-        showAxiosError("맵 버전 목록 조회 실패", res);
-        return;
-      }
-
-      const list = Array.isArray(res.data) ? res.data : [];
-      setMapVersions(list);
-    } catch (err) {
-      console.error(err);
-      setMapVersions([]);
-      showAxiosError("맵 버전 목록 조회 중 오류", err);
-    } finally {
-      setMapLoading(false);
-    }
-  }, [classroomId, authHeaders, showAxiosError]);
   const fetchActiveMap = useCallback(async () => {
     if (!classroomId) return;
 
@@ -800,6 +873,7 @@ export default function SchoolSetting() {
           }
 
           return {
+            mapId: m.mapId,
             imageSrc: toPublicImg(
               m.uploadedImage || m.thumbnailImage || thumbnailImage,
             ),
@@ -825,57 +899,134 @@ export default function SchoolSetting() {
     }
   }, [schoolId, authHeaders, showAxiosError, makeEmptyFloor, thumbnailImage]);
 
+  const fetchSingleMap = useCallback(
+    async (mapId) => {
+      if (!schoolId || !mapId) return null;
+
+      try {
+        const res = await axios.get(
+          `${API_BASE}/api/channels/${schoolId}/maps/${mapId}`,
+          {
+            headers: { ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("단일 구조도 조회 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("구조도 상세 조회 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("구조도 상세 조회 중 오류", err);
+        return null;
+      }
+    },
+    [schoolId, authHeaders, showAxiosError],
+  );
+
+  const updateMapToServer = useCallback(
+    async (mapId, floorIdx) => {
+      if (!schoolId || !mapId) {
+        alert("schoolId 또는 mapId가 없습니다.");
+        return null;
+      }
+
+      const floor = floors[floorIdx];
+      if (!floor) {
+        alert("저장할 층 정보가 없습니다.");
+        return null;
+      }
+
+      const outlineList = (floor.elements || []).filter(
+        (el) => el.type === "건물윤곽",
+      );
+
+      const payload = {
+        floorIndex: floorIdx,
+        floorLabel: floorNames[floorIdx] || `${floorIdx + 1}층`,
+        outlineJson: JSON.stringify(outlineList),
+        scaleMPerPx: 0,
+        originX: 0,
+        originY: 0,
+        elementsJson: JSON.stringify(floor.elements || []),
+      };
+
+      console.log("구조도 수정 payload =", payload);
+
+      try {
+        const res = await axios.post(
+          `${API_BASE}/api/channels/${schoolId}/maps/${mapId}`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("구조도 수정 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("구조도 저장 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("구조도 저장 중 오류", err);
+        return null;
+      }
+    },
+    [schoolId, floors, floorNames, authHeaders, showAxiosError],
+  );
+
+  const deleteMapFromServer = useCallback(
+    async (mapId) => {
+      if (!schoolId || !mapId) {
+        alert("schoolId 또는 mapId가 없습니다.");
+        return false;
+      }
+
+      try {
+        const res = await axios.delete(
+          `${API_BASE}/api/channels/${schoolId}/maps/${mapId}`,
+          {
+            headers: { ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("구조도 삭제 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("구조도 삭제 실패", res);
+          return false;
+        }
+
+        return true;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("구조도 삭제 중 오류", err);
+        return false;
+      }
+    },
+    [schoolId, authHeaders, showAxiosError],
+  );
+
   useEffect(() => {
     if (!schoolId) return;
 
     fetchBeacons();
     fetchSchoolMaps();
   }, [schoolId, fetchBeacons, fetchSchoolMaps]);
-
-  // ====== Save plan to list ======
-  const saveCurrentPlanToList = useCallback(() => {
-    const name = (savePlanName || "").trim();
-    if (!name) {
-      alert("저장할 이름을 입력하세요.");
-      return;
-    }
-
-    const payload = {
-      floors: floors.map((f, idx) => ({
-        name: floorNames[idx] || `${idx + 1}층`,
-        image: {
-          src: f.imageSrc || null,
-          natural: f.imgNatural || { w: 0, h: 0 },
-        },
-        elements: (f.elements || []).map((el) => ({ ...el, floor: idx })),
-      })),
-    };
-
-    // 1. 목록(state)에도 저장
-    const id = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    setSavedPlans((prev) => [...prev, { id, name, payload }]);
-    setSelectedPlanId(id);
-    setPlanFloorIdx(0);
-
-    // 2. 실제 JSON 파일 다운로드
-    const jsonStr = JSON.stringify(payload, null, 2);
-    const blob = new Blob([jsonStr], {
-      type: "application/json;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${name}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    URL.revokeObjectURL(url);
-
-    setIsSavePlanModalOpen(false);
-    setSavePlanName("");
-  }, [floors, floorNames, savePlanName]);
 
   // ====== Zoom & Pan ======
   const [fitScale, setFitScale] = useState(1);
@@ -963,6 +1114,36 @@ export default function SchoolSetting() {
       fetchActiveMap,
     ],
   );
+  const fetchMapVersionDetail = useCallback(
+    async (mapVersionId) => {
+      if (!classroomId || !mapVersionId) return null;
+
+      try {
+        const res = await axios.get(
+          `${API_BASE}/api/rooms/${classroomId}/map-versions/${mapVersionId}`,
+          {
+            headers: { ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("구조도 버전 상세 조회 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("구조도 상세 조회 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("구조도 상세 조회 중 오류", err);
+        return null;
+      }
+    },
+    [classroomId, authHeaders, showAxiosError],
+  );
   const saveMapVersionToServer = useCallback(async () => {
     if (!classroomId) {
       alert("classroomId가 없습니다.");
@@ -974,12 +1155,15 @@ export default function SchoolSetting() {
       return;
     }
 
-    const label = window.prompt("맵 버전 이름을 입력하세요", "");
-    if (!label || !label.trim()) return;
+    const label = (savePlanName || "").trim();
+    if (!label) {
+      alert("맵 버전 이름을 입력하세요.");
+      return;
+    }
 
     const payload = {
       schoolId,
-      label: label.trim(),
+      label,
       createdBy: userId || "",
       floorsJson: JSON.stringify(buildFloorsPayload()),
     };
@@ -1001,14 +1185,19 @@ export default function SchoolSetting() {
       }
 
       const saved = res.data || {};
-      const newMapVersionId = saved.mapVersionId;
+      const newMapVersionId = saved.mapVersionId || null;
 
-      alert("✅ 맵 버전이 저장되었습니다.");
       await fetchMapVersions();
 
       if (newMapVersionId) {
+        setSelectedPlanId(newMapVersionId);
+        setPlanFloorIdx(0);
         await setActiveMapToServer(newMapVersionId);
       }
+
+      setSavePlanName("");
+      setIsSavePlanModalOpen(false);
+      alert("✅ 맵 버전이 저장되었습니다.");
     } catch (err) {
       console.error(err);
       showAxiosError("맵 버전 저장 중 오류", err);
@@ -1016,13 +1205,39 @@ export default function SchoolSetting() {
   }, [
     classroomId,
     schoolId,
+    savePlanName,
     userId,
     buildFloorsPayload,
     authHeaders,
     showAxiosError,
     fetchMapVersions,
     setActiveMapToServer,
-    fetchActiveMap,
+  ]);
+
+  // ✅ 여기 추가
+  useEffect(() => {
+    if (!isPlanModalOpen) return;
+    if (!mapVersions.length) return;
+
+    const targetId =
+      selectedPlanId || activeMapVersionId || mapVersions[0]?.mapVersionId;
+
+    if (!targetId) return;
+
+    const run = async () => {
+      const detail = await fetchMapVersionDetail(targetId);
+      setSelectedPlanId(targetId);
+      setPlanFloorIdx(0);
+      setSelectedPlanDetail(detail);
+    };
+
+    run();
+  }, [
+    isPlanModalOpen,
+    mapVersions,
+    selectedPlanId,
+    activeMapVersionId,
+    fetchMapVersionDetail,
   ]);
 
   const applyZoomAroundPoint = useCallback(
@@ -2221,20 +2436,29 @@ export default function SchoolSetting() {
   const updateMapVersionToServer = useCallback(
     async (mapVersionId) => {
       if (!classroomId || !mapVersionId) {
-        alert("수정할 mapVersionId가 없습니다.");
-        return;
+        alert("mapVersionId가 없습니다.");
+        return null;
       }
 
-      const label = window.prompt("수정할 맵 버전 이름을 입력하세요", "");
-      if (!label || !label.trim()) return;
+      const label = (
+        selectedPlanDetail?.label ||
+        selectedPlan?.label ||
+        ""
+      ).trim();
+      if (!label) {
+        alert("구조도 이름이 없습니다.");
+        return null;
+      }
+
+      const payload = {
+        label,
+        floorsJson: JSON.stringify(buildFloorsPayload()),
+      };
 
       try {
         const res = await axios.put(
           `${API_BASE}/api/rooms/${classroomId}/map-versions/${mapVersionId}`,
-          {
-            label: label.trim(),
-            floorsJson: JSON.stringify(buildFloorsPayload()),
-          },
+          payload,
           {
             headers: { "Content-Type": "application/json", ...authHeaders },
             timeout: 10000,
@@ -2243,26 +2467,33 @@ export default function SchoolSetting() {
         );
 
         if (!(res.status >= 200 && res.status < 300)) {
-          showAxiosError("맵 버전 수정 실패", res);
-          return;
+          showAxiosError("구조도 수정 실패", res);
+          return null;
         }
 
-        alert("✅ 맵 버전이 수정되었습니다.");
+        const detail = await fetchMapVersionDetail(mapVersionId);
+        setSelectedPlanDetail(detail);
         await fetchMapVersions();
+
+        alert("✅ 구조도가 수정되었습니다.");
+        return detail;
       } catch (err) {
         console.error(err);
-        showAxiosError("맵 버전 수정 중 오류", err);
+        showAxiosError("구조도 수정 중 오류", err);
+        return null;
       }
     },
     [
       classroomId,
+      selectedPlanDetail,
+      selectedPlan,
       buildFloorsPayload,
       authHeaders,
       showAxiosError,
+      fetchMapVersionDetail,
       fetchMapVersions,
     ],
   );
-
   const loadMapVersionDetail = useCallback(
     async (mapVersionId) => {
       if (!classroomId || !mapVersionId) return;
@@ -3047,21 +3278,23 @@ export default function SchoolSetting() {
         )}
       </div>
 
-      {/* ✅ 구조도 목록 모달 (저장 모달과 완전 분리) */}
+      {/* ✅ 구조도 목록 모달 */}
       {isPlanModalOpen && (
         <div
           className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center"
           onMouseDown={() => setIsPlanModalOpen(false)}
         >
           <div
-            className="bg-white w-[1100px] max-w-[90vw] h-[85vh] rounded-lg shadow p-4 overflow-hidden relative"
+            className="bg-white w-[1120px] max-w-[95vw] h-[86vh] rounded-[24px] shadow-xl overflow-hidden relative"
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-3">
-              <div className="font-bold">저장된 구조도</div>
+            <div className="flex items-center justify-between px-8 pt-7 pb-4 border-b">
+              <div className="text-[20px] font-extrabold text-gray-900">
+                저장된 구조도
+              </div>
               <button
                 onClick={() => setIsPlanModalOpen(false)}
-                className="w-9 h-9 rounded hover:bg-gray-100 text-gray-700 text-xl leading-none"
+                className="w-10 h-10 rounded-full hover:bg-gray-100 text-gray-600 text-2xl leading-none"
                 aria-label="닫기"
                 title="닫기"
               >
@@ -3069,68 +3302,104 @@ export default function SchoolSetting() {
               </button>
             </div>
 
-            <div className="flex gap-3">
-              {/* 왼쪽: 목록 */}
-              <div className="w-[360px] border rounded p-2 overflow-auto h-[calc(85vh-80px)]">
-                {savedPlans.length === 0 && (
-                  <div className="text-sm text-gray-500 p-2">
-                    추가된 JSON 없음
+            <div className="flex h-[calc(86vh-84px)]">
+              {/* 가운데 목록 */}
+              <div className="w-[420px] bg-[#F7F8F5] border-r px-6 py-6 overflow-y-auto">
+                <div className="flex items-center justify-between mb-5">
+                  <div className="text-[18px] font-extrabold text-[#3F6D2B]">
+                    구조도 목록
+                  </div>
+
+                  <button
+                    onClick={fetchMapVersions}
+                    className="px-4 py-2 rounded-xl bg-[#9CCC7C] text-white font-bold hover:opacity-90"
+                  >
+                    새로고침
+                  </button>
+                </div>
+
+                {mapLoading && (
+                  <div className="text-sm text-gray-500">불러오는 중.</div>
+                )}
+
+                {!mapLoading && mapVersions.length === 0 && (
+                  <div className="text-sm text-gray-500">
+                    저장된 구조도가 없습니다.
                   </div>
                 )}
 
-                {savedPlans.map((plan) => {
-                  const active = plan.id === selectedPlanId;
+                {!mapLoading &&
+                  mapVersions.map((mv) => {
+                    const active = mv.mapVersionId === selectedPlanId;
 
-                  // payload가 { floors }면 해당 floor, 아니면 { elements } 구버전도 대응
-                  const floorData = Array.isArray(plan?.payload?.floors)
-                    ? plan.payload.floors[
-                        Math.min(planFloorIdx, plan.payload.floors.length - 1)
-                      ]
-                    : plan?.payload;
+                    return (
+                      <button
+                        key={mv.mapVersionId}
+                        type="button"
+                        onClick={async () => {
+                          setSelectedPlanId(mv.mapVersionId);
+                          setPlanFloorIdx(0);
 
-                  const els = floorData?.elements || [];
+                          const detail = await fetchMapVersionDetail(
+                            mv.mapVersionId,
+                          );
+                          setSelectedPlanDetail(detail);
+                        }}
+                        className={`w-full text-left rounded-2xl border p-5 mb-4 transition ${
+                          active
+                            ? "border-[#5E8B45] bg-[#EEF5E9] shadow-sm"
+                            : "border-[#E3E6DD] bg-white hover:bg-[#F5F8F1]"
+                        }`}
+                      >
+                        <div className="text-[16px] font-extrabold text-black">
+                          {mv.label || "이름 없는 구조도"}
+                        </div>
 
-                  return (
-                    <button
-                      key={plan.id}
-                      onClick={() => {
-                        setSelectedPlanId(plan.id);
-                        setPlanFloorIdx(0);
-                      }}
-                      className={`w-full text-left p-3 mb-2 border rounded hover:bg-gray-50 ${active ? "bg-gray-50 border-gray-400" : ""}`}
-                    >
-                      <div className="font-semibold">{plan.name}</div>
-                      <div className="text-xs text-gray-500">
-                        elements: {els.length}
-                      </div>
-                    </button>
-                  );
-                })}
+                        <div className="text-sm text-gray-500 mt-2">
+                          {mv.createdAt
+                            ? new Date(mv.createdAt).toLocaleString("ko-KR")
+                            : "저장 시각 정보 없음"}
+                        </div>
+
+                        {mv.mapVersionId === activeMapVersionId && (
+                          <div className="mt-3 inline-flex items-center rounded-lg bg-[#5E8B45] px-3 py-1 text-xs font-bold text-white">
+                            활성 맵
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
               </div>
 
-              {/* 오른쪽: 미리보기 */}
-              <div className="flex-1 border rounded p-3 overflow-auto h-[calc(85vh-80px)]">
+              {/* 오른쪽 미리보기 */}
+              <div className="flex-1 bg-white px-6 py-6 overflow-y-auto">
                 {!selectedPlan ? (
-                  <div className="text-sm text-gray-500">
-                    왼쪽에서 구조도를 선택하세요
+                  <div className="h-full flex items-center justify-center text-sm text-gray-500">
+                    왼쪽에서 구조도를 선택하세요.
                   </div>
                 ) : (
-                  <>
-                    {/* 층 탭 (floors 있는 경우만) */}
-                    {Array.isArray(selectedPlan?.payload?.floors) &&
-                      selectedPlan.payload.floors.length > 0 && (
-                        <div className="flex items-center gap-2 mb-3">
-                          <div className="text-sm text-gray-700 font-medium">
-                            층 선택
-                          </div>
+                  <div className="h-full flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-[22px] font-extrabold text-black">
+                          {selectedPlan.label || "이름 없는 구조도"}
+                        </div>
+                        <div className="text-sm text-gray-500 mt-1">
+                          미리보기
+                        </div>
+                      </div>
+
+                      {selectedPlanFloors.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-600">층 선택</span>
                           <select
                             value={planFloorIdx}
                             onChange={(e) =>
                               setPlanFloorIdx(Number(e.target.value))
                             }
-                            className="border-2 border-gray-500 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2E7D32]"
+                            className="border rounded-lg px-3 py-2 text-sm bg-white"
                           >
-                            {selectedPlan.payload.floors.map((f, idx) => (
+                            {selectedPlanFloors.map((f, idx) => (
                               <option key={idx} value={idx}>
                                 {f.name || `${idx + 1}층`}
                               </option>
@@ -3138,273 +3407,163 @@ export default function SchoolSetting() {
                           </select>
                         </div>
                       )}
+                    </div>
 
-                    {/* ✅ 미리보기: width 100% + 저장 좌표 그대로 (viewBox) */}
-                    {(() => {
-                      const floorData = Array.isArray(
-                        selectedPlan?.payload?.floors,
-                      )
-                        ? selectedPlan.payload.floors[planFloorIdx]
-                        : selectedPlan?.payload;
+                    <div
+                      ref={planPreviewRef}
+                      className="flex-1 min-h-[420px] rounded-2xl border bg-[#FCFCFA] p-4"
+                    >
+                      {!previewFloor ? (
+                        <div className="h-full flex items-center justify-center text-sm text-gray-500">
+                          미리보기 데이터가 없습니다.
+                        </div>
+                      ) : (
+                        <>
+                          <div className="w-full overflow-auto rounded-xl border bg-white">
+                            <svg
+                              width="100%"
+                              viewBox={`0 0 ${
+                                previewFloor?.image?.natural?.w || 1000
+                              } ${previewFloor?.image?.natural?.h || 700}`}
+                              style={{ display: "block", background: "#fff" }}
+                            >
+                              {toPublicImg(previewFloor?.image?.src) && (
+                                <image
+                                  href={toPublicImg(previewFloor?.image?.src)}
+                                  x="0"
+                                  y="0"
+                                  width={
+                                    previewFloor?.image?.natural?.w || 1000
+                                  }
+                                  height={
+                                    previewFloor?.image?.natural?.h || 700
+                                  }
+                                  preserveAspectRatio="xMidYMid meet"
+                                />
+                              )}
 
-                      const els = floorData?.elements || [];
-
-                      const src = toPublicImg(
-                        floorData?.image?.src ||
-                          floorData?.imageSrc ||
-                          floorData?.imagePath ||
-                          "/img/1층.png",
-                      );
-
-                      const natW =
-                        floorData?.image?.natural?.w ||
-                        floorData?.imgNatural?.w ||
-                        floorData?.natural?.w ||
-                        1000;
-
-                      const natH =
-                        floorData?.image?.natural?.h ||
-                        floorData?.imgNatural?.h ||
-                        floorData?.natural?.h ||
-                        600;
-
-                      const previewTypeColor = (type, alpha = 0.25) => {
-                        switch (type) {
-                          case "제한 구역":
-                            return `rgba(255,165,0,${alpha})`;
-                          case "재난 구역":
-                            return `rgba(255,0,0,${alpha})`;
-                          case "안전 구역":
-                            return `rgba(0,200,0,${alpha})`;
-                          case "방":
-                            return `rgba(0,112,255,${alpha})`;
-                          default:
-                            return `rgba(0,0,0,0)`;
-                        }
-                      };
-
-                      return (
-                        <div className="mb-3">
-                          <svg
-                            viewBox={`0 0 ${natW} ${natH}`}
-                            preserveAspectRatio="xMinYMin meet"
-                            style={{
-                              width: "100%",
-                              height: "auto",
-                              display: "block",
-                              border: "1px solid #eee",
-                              borderRadius: 6,
-                              background: "#fafafa",
-                            }}
-                          >
-                            {/* 배경 이미지 */}
-                            <image
-                              href={src}
-                              x="0"
-                              y="0"
-                              width={natW}
-                              height={natH}
-                            />
-
-                            {/* 건물윤곽 */}
-                            {els
-                              .filter(
-                                (el) =>
+                              {(previewFloor?.elements || []).map((el) => {
+                                if (
                                   el.type === "건물윤곽" &&
-                                  el.points?.length >= 3,
-                              )
-                              .map((el) => {
-                                const d =
-                                  el.points
-                                    .map(
-                                      (p, i) =>
-                                        `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`,
-                                    )
-                                    .join(" ") + " Z";
-                                return (
-                                  <path
-                                    key={el.id || Math.random()}
-                                    d={d}
-                                    fill="rgba(0,0,0,0.04)"
-                                    stroke="rgba(0,0,0,0.55)"
-                                    strokeWidth="2"
-                                  />
-                                );
-                              })}
+                                  Array.isArray(el.points)
+                                ) {
+                                  return (
+                                    <polygon
+                                      key={el.id}
+                                      points={el.points
+                                        .map((p) => `${p.x},${p.y}`)
+                                        .join(" ")}
+                                      fill="rgba(80,120,255,0.08)"
+                                      stroke="rgba(60,60,60,0.9)"
+                                      strokeWidth="3"
+                                    />
+                                  );
+                                }
 
-                            {/* 방/구역 */}
-                            {els
-                              .filter((el) =>
-                                [
-                                  "방",
-                                  "제한 구역",
-                                  "재난 구역",
-                                  "안전 구역",
-                                ].includes(el.type),
-                              )
-                              .map((el) => (
-                                <g key={el.id || Math.random()}>
+                                if (el.type === "문") {
+                                  return (
+                                    <circle
+                                      key={el.id}
+                                      cx={el.x}
+                                      cy={el.y}
+                                      r="12"
+                                      fill="rgba(120,120,120,0.9)"
+                                    />
+                                  );
+                                }
+
+                                if (el.type === "비콘") {
+                                  return (
+                                    <circle
+                                      key={el.id}
+                                      cx={el.x}
+                                      cy={el.y}
+                                      r="14"
+                                      fill="rgba(255,140,0,0.9)"
+                                    />
+                                  );
+                                }
+
+                                return (
                                   <rect
-                                    x={el.x || 0}
-                                    y={el.y || 0}
+                                    key={el.id}
+                                    x={el.x}
+                                    y={el.y}
                                     width={el.width || 0}
                                     height={el.height || 0}
-                                    fill={previewTypeColor(el.type, 0.22)}
-                                    stroke="rgba(0,0,0,0.45)"
+                                    fill={typeColor(el.type, 0.25)}
+                                    stroke="rgba(0,0,0,0.55)"
                                     strokeWidth="2"
-                                  />
-                                  {el.name ? (
-                                    <g>
-                                      <rect
-                                        x={(el.x || 0) + 4}
-                                        y={(el.y || 0) + 4}
-                                        width={Math.min(
-                                          130,
-                                          Math.max(40, (el.width || 0) - 8),
-                                        )}
-                                        height="18"
-                                        rx="4"
-                                        fill="rgba(255,255,255,0.9)"
-                                        stroke="rgba(0,0,0,0.08)"
-                                      />
-                                      <text
-                                        x={(el.x || 0) + 10}
-                                        y={(el.y || 0) + 17}
-                                        fontSize="11"
-                                        fill="#111"
-                                      >
-                                        {el.name}
-                                      </text>
-                                    </g>
-                                  ) : null}
-                                </g>
-                              ))}
-
-                            {/* 문 */}
-                            {els
-                              .filter((el) => el.type === "문")
-                              .map((el) => {
-                                const w = 28;
-                                const h = 10;
-                                const x = el.x || 0;
-                                const y = el.y || 0;
-                                const a = el.angle || 0;
-                                return (
-                                  <rect
-                                    key={el.id || Math.random()}
-                                    x={x - w / 2}
-                                    y={y - h / 2}
-                                    width={w}
-                                    height={h}
-                                    fill="rgba(60,60,60,0.95)"
-                                    stroke="rgba(0,0,0,0.4)"
-                                    strokeWidth="1"
-                                    transform={`rotate(${a} ${x} ${y})`}
+                                    rx="4"
                                   />
                                 );
                               })}
-
-                            {/* 비콘 */}
-                            {els
-                              .filter((el) => el.type === "비콘")
-                              .map((el) => {
-                                const x = el.x || 0;
-                                const y = el.y || 0;
-                                const size = el.width || 40;
-                                return (
-                                  <circle
-                                    key={el.id || Math.random()}
-                                    cx={x}
-                                    cy={y}
-                                    r={size / 2}
-                                    fill="#e6e6e6"
-                                    stroke="rgba(0,0,0,0.18)"
-                                  />
-                                );
-                              })}
-                          </svg>
-                        </div>
-                      );
-                    })()}
-
-                    {/* 요소 요약 */}
-                    {(() => {
-                      const floorData = Array.isArray(
-                        selectedPlan?.payload?.floors,
-                      )
-                        ? selectedPlan.payload.floors[planFloorIdx]
-                        : selectedPlan?.payload;
-
-                      const els = floorData?.elements || [];
-                      const countByType = els.reduce((acc, el) => {
-                        const t = el.type || "unknown";
-                        acc[t] = (acc[t] || 0) + 1;
-                        return acc;
-                      }, {});
-
-                      return (
-                        <div className="text-sm">
-                          <div className="font-semibold mb-2">요소 요약</div>
-                          <div className="text-xs text-gray-600 mb-2">
-                            총 {els.length}개
+                            </svg>
                           </div>
-                          <ul className="text-sm list-disc pl-5">
-                            {Object.entries(countByType).map(([t, c]) => (
-                              <li key={t}>
-                                {t}: {c}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      );
-                    })()}
 
-                    {/* 적용 버튼 */}
-                    <button
-                      onClick={() => {
-                        const floorData = Array.isArray(
-                          selectedPlan?.payload?.floors,
-                        )
-                          ? selectedPlan.payload.floors[planFloorIdx]
-                          : selectedPlan?.payload;
+                          <div className="mt-4">
+                            <div className="text-sm font-bold text-gray-800 mb-2">
+                              요소 요약
+                            </div>
+                            <div className="text-sm text-gray-600 space-y-1">
+                              <div>
+                                총 {previewFloor?.elements?.length || 0}개
+                              </div>
+                              <div>
+                                건물윤곽:{" "}
+                                {
+                                  (previewFloor?.elements || []).filter(
+                                    (el) => el.type === "건물윤곽",
+                                  ).length
+                                }
+                              </div>
+                              <div>
+                                방:{" "}
+                                {
+                                  (previewFloor?.elements || []).filter(
+                                    (el) => el.type === "방",
+                                  ).length
+                                }
+                              </div>
+                              <div>
+                                안전 구역:{" "}
+                                {
+                                  (previewFloor?.elements || []).filter(
+                                    (el) => el.type === "안전 구역",
+                                  ).length
+                                }
+                              </div>
+                              <div>
+                                비상구/문:{" "}
+                                {
+                                  (previewFloor?.elements || []).filter(
+                                    (el) => el.type === "문",
+                                  ).length
+                                }
+                              </div>
+                            </div>
+                          </div>
 
-                        const fixed = (floorData.elements || []).map((el) => ({
-                          ...el,
-                          floor: currentFloorIndex,
-                        }));
-                        const src = floorData?.image?.src || "/img/1층.png";
-                        const publicSrc = src.startsWith("/") ? src : `/${src}`;
-
-                        setFloors((prev) => {
-                          const next = [...prev];
-                          const curr =
-                            next[currentFloorIndex] || makeEmptyFloor();
-
-                          next[currentFloorIndex] = {
-                            ...curr,
-                            imageSrc: publicSrc,
-                            uploadedFile: null,
-                            imgNatural:
-                              floorData?.image?.natural || curr.imgNatural,
-                            elements: fixed,
-                          };
-                          return next;
-                        });
-
-                        setIsPlanModalOpen(false);
-                      }}
-                      className="mt-4 w-full bg-[#2E7D32] text-white rounded py-2 font-bold hover:bg-[#256428]"
-                    >
-                      이 구조도를 현재 층에 적용
-                    </button>
-                  </>
+                          <div className="mt-5">
+                            <button
+                              onClick={() =>
+                                setActiveMapToServer(selectedPlan.mapVersionId)
+                              }
+                              className="w-full h-[52px] rounded-xl bg-[#5E8B45] text-white font-extrabold hover:opacity-90"
+                            >
+                              이 구조도를 현재 층에 적용
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
           </div>
         </div>
       )}
-
       {/* ✅ 저장 모달 (구조도 목록 모달 바깥) */}
       {isSavePlanModalOpen && (
         <div
@@ -3436,91 +3595,13 @@ export default function SchoolSetting() {
               placeholder="예) 제한구역 3개 구조도"
               autoFocus
             />
-
-            <div className="flex justify-end mt-4">
+            <div className="flex justify-end mt-6">
               <button
-                className="px-6 py-2 rounded bg-[#2E7D32] text-white font-bold hover:bg-[#256428]"
                 onClick={saveMapVersionToServer}
+                className="px-6 py-3 rounded-xl bg-[#2E7D32] text-white font-bold hover:bg-[#256428]"
               >
                 저장
               </button>
-              <div className="p-4 bg-white rounded shadow space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-bold text-[#2E7D32]">
-                    맵 버전 목록
-                  </h3>
-                  <button
-                    onClick={fetchMapVersions}
-                    className="px-3 py-2 rounded bg-[#66BB6A] text-white"
-                  >
-                    새로고침
-                  </button>
-                </div>
-
-                {mapLoading && (
-                  <p className="text-sm text-gray-500">불러오는 중...</p>
-                )}
-
-                {!mapLoading && mapVersions.length === 0 && (
-                  <p className="text-sm text-gray-500">
-                    저장된 맵 버전이 없습니다.
-                  </p>
-                )}
-
-                {!mapLoading && mapVersions.length > 0 && (
-                  <div className="space-y-2">
-                    {mapVersions.map((mv) => (
-                      <div
-                        key={mv.mapVersionId}
-                        className={`border rounded p-3 ${
-                          activeMapVersionId === mv.mapVersionId
-                            ? "border-[#2E7D32] bg-[#E8F5E9]"
-                            : "border-gray-200"
-                        }`}
-                      >
-                        <div className="font-semibold">
-                          {mv.label || "(이름 없음)"}
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {mv.createdAt
-                            ? new Date(mv.createdAt).toLocaleString()
-                            : ""}
-                          {mv.isActive ? " / 활성 맵" : ""}
-                        </div>
-
-                        <div className="flex gap-2 mt-3">
-                          <button
-                            onClick={() =>
-                              loadMapVersionDetail(mv.mapVersionId)
-                            }
-                            className="px-3 py-1 rounded border"
-                          >
-                            불러오기
-                          </button>
-
-                          <button
-                            onClick={() =>
-                              setActiveMapToServer(mv.mapVersionId)
-                            }
-                            className="px-3 py-1 rounded border"
-                          >
-                            활성화
-                          </button>
-
-                          <button
-                            onClick={() =>
-                              updateMapVersionToServer(mv.mapVersionId)
-                            }
-                            className="px-3 py-1 rounded border"
-                          >
-                            현재 편집본으로 덮어쓰기
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
           </div>
         </div>
