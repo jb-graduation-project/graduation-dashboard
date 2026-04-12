@@ -25,16 +25,15 @@ export default function SchoolSetting() {
   }, [location.state]);
 
   const schoolId = useMemo(() => {
-    return (
-      location.state?.schoolId ||
-      location.state?.channelId ||
-      location.state?.id ||
-      null
-    );
+    return location.state?.schoolId || localStorage.getItem("schoolId") || null;
   }, [location.state]);
 
   const thumbnailImage = useMemo(() => {
-    return location.state?.thumbnailImage || null;
+    return (
+      location.state?.thumbnailImage ||
+      localStorage.getItem("thumbnailImage") ||
+      null
+    );
   }, [location.state]);
 
   const userId = useMemo(() => {
@@ -57,6 +56,13 @@ export default function SchoolSetting() {
   const [activeMapVersionId, setActiveMapVersionId] = useState(null);
   const [mapLoading, setMapLoading] = useState(false);
 
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState(null);
+  const [selectedTemplateDetail, setSelectedTemplateDetail] = useState(null);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateDescription, setTemplateDescription] = useState("");
+
   const [beaconList, setBeaconList] = useState([]);
   const [beaconLoading, setBeaconLoading] = useState(false);
 
@@ -78,6 +84,9 @@ export default function SchoolSetting() {
 
   // 구조도(플랜) 모달
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+
+  const [uploadingMap, setUploadingMap] = useState(false);
+  const fileInputRef = useRef(null);
 
   const analyzeRunIdRef = useRef(0);
 
@@ -299,9 +308,12 @@ export default function SchoolSetting() {
 
   // ====== Auto analyze (optional) ======
   const runAutoAnalyze = useCallback(
-    async (floorIdx, file) => {
-      if (!file) {
-        alert("업로드된 원본 파일이 없습니다.");
+    async (floorIdx) => {
+      const floor = floors[floorIdx];
+      const mapId = floor?.mapId;
+
+      if (!schoolId || !mapId) {
+        alert("자동 분석할 mapId 또는 schoolId가 없습니다.");
         return;
       }
 
@@ -330,19 +342,19 @@ export default function SchoolSetting() {
       });
 
       try {
-        const form = new FormData();
-        form.append("image", file);
-        form.append("file", file);
-
-        const res = await fetch(`${API_BASE}/analyze-floorplan`, {
-          method: "POST",
-          body: form,
-          signal: controller.signal,
-        });
+        const res = await fetch(
+          `${API_BASE}/api/channels/${schoolId}/maps/${mapId}/analyze`,
+          {
+            method: "POST",
+            headers: { ...authHeaders },
+            signal: controller.signal,
+          },
+        );
 
         if (!res.ok) throw new Error(await res.text());
 
         const data = await res.json();
+
         const serverElements = Array.isArray(data.elements)
           ? data.elements
           : [];
@@ -353,26 +365,37 @@ export default function SchoolSetting() {
 
         if (myRunId !== analyzeRunIdRef.current) return;
 
-        // 이 FloorIdx에 snapshot을 남기는 게 맞지만, 간단히 현재 층 기준으로 스냅샷
-        // (원하면 floorIdx 스냅샷로 바꿔도 됨)
         pushUndoSnapshot();
+
+        setFloorNames((prev) => {
+          const next = [...prev];
+          next[floorIdx] =
+            data.floorLabel || next[floorIdx] || `${floorIdx + 1}층`;
+          return next;
+        });
 
         setFloors((prev) => {
           const next = [...prev];
           const curr = next[floorIdx] || makeEmptyFloor();
+
           next[floorIdx] = {
             ...curr,
+            mapId: data.mapId || curr.mapId,
+            imageSrc: toPublicImg(data.uploadedImage) || curr.imageSrc,
             elements: fixedElements,
             hasAutoAnalysisResult: true,
             autoElementsCache: fixedElements,
             autoAnalysisHidden: false,
+            ocrAvailable: !!data.ocrAvailable,
           };
+
           return next;
         });
       } catch (e) {
         console.error("자동 분석 에러:", e);
-        if (e?.name !== "AbortError")
+        if (e?.name !== "AbortError") {
           alert("자동 분석 실패\n" + (e?.message || "알 수 없는 오류"));
+        }
       } finally {
         if (myRunId === analyzeRunIdRef.current) {
           setAutoAnalyzing(false);
@@ -385,9 +408,8 @@ export default function SchoolSetting() {
         }
       }
     },
-    [makeEmptyFloor, pushUndoSnapshot],
+    [floors, schoolId, authHeaders, makeEmptyFloor, pushUndoSnapshot],
   );
-
   // ====== UI State ======
   const modeButtons = ["제한 구역", "방", "문", "비콘", "건물윤곽"];
   const [mode, setMode] = useState(null);
@@ -399,6 +421,28 @@ export default function SchoolSetting() {
 
   const [showImage, setShowImage] = useState(true);
   const [imageLoaded, setImageLoaded] = useState(false);
+
+  useEffect(() => {
+    const w = currentFloor?.imgNatural?.w || 0;
+    const h = currentFloor?.imgNatural?.h || 0;
+
+    setZoom(1);
+    setImgOffset({ x: 0, y: 0 });
+
+    if (imageSrc && w > 0 && h > 0) {
+      const fit = Math.min(VIEW_W / w, VIEW_H / h, 1);
+      setFitScale(fit);
+      setImageLoaded(true);
+    } else {
+      setFitScale(1);
+      setImageLoaded(false);
+    }
+  }, [
+    imageSrc,
+    currentFloorIndex,
+    currentFloor?.imgNatural?.w,
+    currentFloor?.imgNatural?.h,
+  ]);
 
   const [selectedId, setSelectedId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -812,7 +856,9 @@ export default function SchoolSetting() {
         })),
       );
 
-      setCurrentFloorIndex(0);
+      setCurrentFloorIndex((prev) =>
+        Math.min(prev, Math.max(parsedFloors.length - 1, 0)),
+      );
     } catch (err) {
       console.error(err);
     }
@@ -851,6 +897,19 @@ export default function SchoolSetting() {
       const sorted = [...list].sort(
         (a, b) => (a.floorIndex ?? 0) - (b.floorIndex ?? 0),
       );
+      console.log(
+        "층 목록 확인",
+        sorted.map((m, idx) => ({
+          idx,
+          floorIndex: m.floorIndex,
+          floorLabel: m.floorLabel,
+          uploadedImage: m.uploadedImage,
+          thumbnailImage: m.thumbnailImage,
+          finalImage: toPublicImg(
+            m.uploadedImage || m.thumbnailImage || thumbnailImage,
+          ),
+        })),
+      );
 
       setFloorNames(
         sorted.map(
@@ -863,7 +922,7 @@ export default function SchoolSetting() {
           toPublicImg(m.uploadedImage || m.thumbnailImage || thumbnailImage),
         ),
       );
-      setFloors(
+      setFloors((prevFloors) =>
         sorted.map((m, idx) => {
           let parsedElements = [];
           try {
@@ -872,13 +931,19 @@ export default function SchoolSetting() {
             parsedElements = [];
           }
 
+          const nextImageSrc = toPublicImg(
+            m.uploadedImage || m.thumbnailImage || thumbnailImage,
+          );
+
+          const prevFloor = prevFloors[idx];
+          const keepNatural =
+            prevFloor?.imageSrc === nextImageSrc ? prevFloor.imgNatural : null;
+
           return {
             mapId: m.mapId,
-            imageSrc: toPublicImg(
-              m.uploadedImage || m.thumbnailImage || thumbnailImage,
-            ),
+            imageSrc: nextImageSrc,
             uploadedFile: null,
-            imgNatural: { w: 0, h: 0 },
+            imgNatural: keepNatural || { w: 0, h: 0 },
             elements: Array.isArray(parsedElements)
               ? parsedElements.map((el) => ({ ...el, floor: idx }))
               : [],
@@ -892,7 +957,9 @@ export default function SchoolSetting() {
         }),
       );
 
-      setCurrentFloorIndex(0);
+      setCurrentFloorIndex((prev) =>
+        Math.min(prev, Math.max(sorted.length - 1, 0)),
+      );
     } catch (err) {
       console.error(err);
       showAxiosError("학교 구조도 조회 중 오류", err);
@@ -1040,39 +1107,43 @@ export default function SchoolSetting() {
   const displayedScale = fitScale * zoom;
   const displayedW = (imgNatural.w || 0) * displayedScale;
   const displayedH = (imgNatural.h || 0) * displayedScale;
-  const baseLeft = (VIEW_W - displayedW) / 2;
-  const baseTop = (VIEW_H - displayedH) / 2;
-  const imgLeft = baseLeft + imgOffset.x;
-  const imgTop = baseTop + imgOffset.y;
+
+  const viewportCenterX = VIEW_W / 2;
+  const viewportCenterY = VIEW_H / 2;
+
+  const imgLeft = viewportCenterX - displayedW / 2 + imgOffset.x;
+  const imgTop = viewportCenterY - displayedH / 2 + imgOffset.y;
+
+  console.log("VIEW_W, VIEW_H =", VIEW_W, VIEW_H);
+  console.log("displayedW, displayedH =", displayedW, displayedH);
+  console.log("viewportCenter =", viewportCenterX, viewportCenterY);
+  console.log("imgLeft, imgTop =", imgLeft, imgTop);
 
   const clampOffsetForScale = useCallback(
     (ox, oy, newScale) => {
       const w = (imgNatural.w || 0) * newScale;
       const h = (imgNatural.h || 0) * newScale;
-      const newBaseLeft = (VIEW_W - w) / 2;
-      const newBaseTop = (VIEW_H - h) / 2;
 
-      if (w <= VIEW_W) ox = 0;
-      else {
-        const minLeft = VIEW_W - w;
-        const maxLeft = 0;
-        const nextLeft = newBaseLeft + ox;
-        if (nextLeft > maxLeft) ox = maxLeft - newBaseLeft;
-        else if (nextLeft < minLeft) ox = minLeft - newBaseLeft;
+      // 이미지가 뷰포트보다 작으면 중앙 고정
+      if (w <= VIEW_W) {
+        ox = 0;
+      } else {
+        const minOffsetX = -(w - VIEW_W) / 2;
+        const maxOffsetX = (w - VIEW_W) / 2;
+        ox = clamp(ox, minOffsetX, maxOffsetX);
       }
 
-      if (h <= VIEW_H) oy = 0;
-      else {
-        const minTop = VIEW_H - h;
-        const maxTop = 0;
-        const nextTop = newBaseTop + oy;
-        if (nextTop > maxTop) oy = maxTop - newBaseTop;
-        else if (nextTop < minTop) oy = minTop - newBaseTop;
+      if (h <= VIEW_H) {
+        oy = 0;
+      } else {
+        const minOffsetY = -(h - VIEW_H) / 2;
+        const maxOffsetY = (h - VIEW_H) / 2;
+        oy = clamp(oy, minOffsetY, maxOffsetY);
       }
 
       return { x: ox, y: oy };
     },
-    [imgNatural.h, imgNatural.w],
+    [imgNatural.w, imgNatural.h, clamp],
   );
   const setActiveMapToServer = useCallback(
     async (mapVersionId) => {
@@ -1242,8 +1313,9 @@ export default function SchoolSetting() {
 
   const applyZoomAroundPoint = useCallback(
     (oldZoom, newZoom, centerClient) => {
-      if (!viewportRef.current || !centerClient || !imageSrc || !imageLoaded)
+      if (!viewportRef.current || !centerClient || !imageSrc || !imageLoaded) {
         return;
+      }
 
       const rect = viewportRef.current.getBoundingClientRect();
       const clientX = centerClient.x;
@@ -1252,34 +1324,37 @@ export default function SchoolSetting() {
       const oldScale = fitScale * oldZoom;
       const newScale = fitScale * newZoom;
 
-      const oldW = (imgNatural.w || 0) * oldScale;
-      const oldH = (imgNatural.h || 0) * oldScale;
-      const oldBaseLeft = (VIEW_W - oldW) / 2;
-      const oldBaseTop = (VIEW_H - oldH) / 2;
+      const viewportCenterX = VIEW_W / 2;
+      const viewportCenterY = VIEW_H / 2;
 
-      const localX =
-        clientX - rect.left - (oldBaseLeft + imgOffsetRef.current.x);
-      const localY = clientY - rect.top - (oldBaseTop + imgOffsetRef.current.y);
+      const oldDisplayedW = (imgNatural.w || 0) * oldScale;
+      const oldDisplayedH = (imgNatural.h || 0) * oldScale;
+      const oldLeft =
+        viewportCenterX - oldDisplayedW / 2 + imgOffsetRef.current.x;
+      const oldTop =
+        viewportCenterY - oldDisplayedH / 2 + imgOffsetRef.current.y;
+
+      const localX = clientX - rect.left - oldLeft;
+      const localY = clientY - rect.top - oldTop;
 
       const natX = localX / oldScale;
       const natY = localY / oldScale;
 
-      const newW = (imgNatural.w || 0) * newScale;
-      const newH = (imgNatural.h || 0) * newScale;
-      const newBaseLeft = (VIEW_W - newW) / 2;
-      const newBaseTop = (VIEW_H - newH) / 2;
+      const newDisplayedW = (imgNatural.w || 0) * newScale;
+      const newDisplayedH = (imgNatural.h || 0) * newScale;
+      const newLeftBase = viewportCenterX - newDisplayedW / 2;
+      const newTopBase = viewportCenterY - newDisplayedH / 2;
 
-      const newLocalX = natX * newScale;
-      const newLocalY = natY * newScale;
-
-      const desiredOffsetX = clientX - rect.left - newBaseLeft - newLocalX;
-      const desiredOffsetY = clientY - rect.top - newBaseTop - newLocalY;
+      const desiredOffsetX =
+        clientX - rect.left - newLeftBase - natX * newScale;
+      const desiredOffsetY = clientY - rect.top - newTopBase - natY * newScale;
 
       const clamped = clampOffsetForScale(
         desiredOffsetX,
         desiredOffsetY,
         newScale,
       );
+
       setImgOffset(clamped);
     },
     [
@@ -1287,8 +1362,8 @@ export default function SchoolSetting() {
       fitScale,
       imageLoaded,
       imageSrc,
-      imgNatural.h,
       imgNatural.w,
+      imgNatural.h,
     ],
   );
 
@@ -1563,11 +1638,12 @@ export default function SchoolSetting() {
       const img = ev.target;
       const w = img.naturalWidth || 0;
       const h = img.naturalHeight || 0;
+      const floorIdx = currentFloorIndexRef.current;
 
       setFloors((prev) => {
         const next = [...prev];
-        const curr = next[currentFloorIndex] || makeEmptyFloor();
-        next[currentFloorIndex] = { ...curr, imgNatural: { w, h } };
+        const curr = next[floorIdx] || makeEmptyFloor();
+        next[floorIdx] = { ...curr, imgNatural: { w, h } };
         return next;
       });
 
@@ -1577,7 +1653,7 @@ export default function SchoolSetting() {
       setImgOffset({ x: 0, y: 0 });
       setImageLoaded(true);
     },
-    [currentFloorIndex, makeEmptyFloor],
+    [makeEmptyFloor],
   );
 
   // ====== Floors UI ======
@@ -1596,15 +1672,18 @@ export default function SchoolSetting() {
   }, []);
 
   const goNextFloor = useCallback(() => {
+    console.log("▶ 클릭 전", {
+      currentFloorIndex,
+      floorsLength: floors.length,
+      floorNames,
+      imageSrcs: floors.map((f) => f.imageSrc),
+    });
+
     setCurrentFloorIndex((p) => {
-      const nextIdx = p + 1;
-
-      setFloorNames((names) =>
-        nextIdx < names.length ? names : [...names, `${nextIdx + 1}층`],
-      );
-      setFloors((fs) => (nextIdx < fs.length ? fs : [...fs, makeEmptyFloor()]));
-
-      return nextIdx;
+      const maxIdx = floors.length - 1;
+      const next = Math.min(p + 1, maxIdx);
+      console.log("▶ 계산", { prev: p, maxIdx, next });
+      return next;
     });
 
     setMode(null);
@@ -1617,7 +1696,7 @@ export default function SchoolSetting() {
     setOutlinePoints([]);
     setRotatingDoorId(null);
     setPendingDoorId(null);
-  }, [makeEmptyFloor]);
+  }, [currentFloorIndex, floors, floorNames]);
 
   const renameFloor = useCallback(() => {
     const currName =
@@ -2540,7 +2619,9 @@ export default function SchoolSetting() {
           })),
         );
 
-        setCurrentFloorIndex(0);
+        setCurrentFloorIndex((prev) =>
+          Math.min(prev, Math.max(parsedFloors.length - 1, 0)),
+        );
       } catch (err) {
         console.error(err);
         showAxiosError("맵 버전 상세 조회 중 오류", err);
@@ -2739,16 +2820,15 @@ export default function SchoolSetting() {
               <button
                 onClick={() => {
                   const curr = floors[currentFloorIndex];
-                  if (!curr?.uploadedFile) {
-                    alert("업로드된 원본 이미지가 없습니다.");
+                  if (!curr?.mapId) {
+                    alert("자동 분석할 구조도 mapId가 없습니다.");
                     return;
                   }
-                  runAutoAnalyze(currentFloorIndex, curr.uploadedFile);
+                  runAutoAnalyze(currentFloorIndex);
                 }}
-                className={btnSub}
-                disabled={!imageSrc}
+                className="w-[200px] h-[52px] rounded-xl bg-[#5E8B45] text-white font-extrabold hover:opacity-90"
               >
-                자동 분석하기
+                구조도 자동 분석
               </button>
             )}
 
@@ -2861,6 +2941,7 @@ export default function SchoolSetting() {
             {/* 이미지 */}
             {imageSrc && showImage ? (
               <img
+                key={`${currentFloorIndex}-${imageSrc}`}
                 src={imageSrc}
                 alt="floorplan"
                 onLoad={(e) => {
@@ -2869,6 +2950,7 @@ export default function SchoolSetting() {
                 }}
                 onError={(e) => {
                   console.error("❌ 이미지 로드 실패:", imageSrc, e);
+                  setImageLoaded(false);
                 }}
                 draggable={false}
                 style={{
@@ -2878,6 +2960,7 @@ export default function SchoolSetting() {
                   width: displayedW,
                   height: displayedH,
                   pointerEvents: "none",
+                  opacity: imageLoaded ? 1 : 0,
                 }}
               />
             ) : !imageSrc ? (
@@ -3546,9 +3629,17 @@ export default function SchoolSetting() {
 
                           <div className="mt-5">
                             <button
-                              onClick={() =>
-                                setActiveMapToServer(selectedPlan.mapVersionId)
-                              }
+                              onClick={async () => {
+                                if (!selectedPlan?.mapVersionId) {
+                                  alert("적용할 구조도를 먼저 선택하세요.");
+                                  return;
+                                }
+
+                                await setActiveMapToServer(
+                                  selectedPlan.mapVersionId,
+                                );
+                                setIsPlanModalOpen(false);
+                              }}
                               className="w-full h-[52px] rounded-xl bg-[#5E8B45] text-white font-extrabold hover:opacity-90"
                             >
                               이 구조도를 현재 층에 적용

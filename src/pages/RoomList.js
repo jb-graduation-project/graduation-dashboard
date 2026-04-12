@@ -44,6 +44,7 @@ function RoomList() {
 
   const [rooms, setRooms] = useState([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
+  const [codeLoading, setCodeLoading] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
@@ -101,6 +102,55 @@ function RoomList() {
       showAxiosError("방 목록 조회 중 오류", e);
     } finally {
       setRoomsLoading(false);
+    }
+  }, [schoolId, authHeaders, showAxiosError]);
+
+  const handleRegenerateSchoolCode = useCallback(async () => {
+    if (!schoolId) {
+      alert("schoolId가 없어 채널 코드를 재발급할 수 없습니다.");
+      return;
+    }
+
+    const ok = window.confirm("채널 코드를 재발급하시겠습니까?");
+    if (!ok) return;
+
+    try {
+      setCodeLoading(true);
+
+      const res = await axios.put(
+        `${API_BASE}/api/channels/${schoolId}/room-code`,
+        {},
+        {
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders,
+          },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("채널 코드 재발급 실패", res);
+        return;
+      }
+
+      // 백엔드 응답 형태 대응
+      const newCode =
+        res.data?.roomCode ||
+        res.data?.schoolCode ||
+        res.data?.accessCode ||
+        res.data?.joinCode ||
+        res.data?.code ||
+        "없음";
+
+      setSchoolCode(newCode);
+      alert(`채널 코드가 재발급되었습니다.\n새 코드: ${newCode}`);
+    } catch (e) {
+      console.error("채널 코드 재발급 실패:", e);
+      showAxiosError("채널 코드 재발급 중 오류", e);
+    } finally {
+      setCodeLoading(false);
     }
   }, [schoolId, authHeaders, showAxiosError]);
 
@@ -201,8 +251,18 @@ function RoomList() {
         <div className="w-full bg-white border border-green-500 rounded-3xl px-6 py-4 space-y-2">
           <h2 className="text-2xl font-bold">{schoolName}</h2>
 
-          <div className="inline-flex items-center gap-2 bg-[#FBC02D] text-black font-bold px-5 py-3 rounded-2xl">
-            <span>학교코드: {schoolCode}</span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="inline-flex items-center gap-2 bg-[#FBC02D] text-black font-bold px-5 py-3 rounded-2xl">
+              <span>학교코드: {schoolCode}</span>
+            </div>
+
+            <button
+              onClick={handleRegenerateSchoolCode}
+              disabled={codeLoading}
+              className="px-4 py-2 rounded-xl border border-green-500 bg-white text-green-700 font-semibold hover:bg-green-50 disabled:opacity-60"
+            >
+              {codeLoading ? "재발급 중..." : "코드 재발급"}
+            </button>
           </div>
 
           <p className="text-sm text-gray-500">
