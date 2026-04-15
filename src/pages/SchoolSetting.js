@@ -510,12 +510,15 @@ export default function SchoolSetting() {
 
   // 현재 층에서 다음 비콘 번호 계산 (1부터)
   const nextBeaconNo = useMemo(() => {
-    const currEls = (floors[currentFloorIndex]?.elements || []).filter(
-      (el) => el.type === "비콘" && (el.floor ?? 0) === currentFloorIndex,
+    const currentServerBeacons = (beaconList || []).filter(
+      (b) => Number(b.floorIndex) === Number(currentFloorIndex),
     );
-    const maxNo = currEls.reduce((m, el) => Math.max(m, el.beaconNo || 0), 0);
+    const maxNo = currentServerBeacons.reduce(
+      (m, b) => Math.max(m, Number(b.beaconNo || 0)),
+      0,
+    );
     return maxNo + 1;
-  }, [floors, currentFloorIndex]);
+  }, [beaconList, currentFloorIndex]);
 
   const fetchBeacons = useCallback(async () => {
     if (!schoolId) {
@@ -654,7 +657,18 @@ export default function SchoolSetting() {
   );
 
   const confirmAddBeacon = useCallback(async () => {
-    if (!pendingBeaconNat) return;
+    console.log("===== 비콘 추가 클릭 =====");
+    console.log("현재 층 index =", currentFloorIndex);
+    console.log("현재 층 elements =", floors[currentFloorIndex]?.elements);
+    console.log(
+      "현재 층 비콘 elements =",
+      (floors[currentFloorIndex]?.elements || []).filter(
+        (el) => el.type === "비콘",
+      ),
+    );
+    console.log("서버 beaconList =", beaconList);
+
+    if (!pendingBeaconNat) return alert("위치를 먼저 선택하세요.");
 
     const uuid = (beaconForm.uuid || "").trim();
     const majorNum = Number(beaconForm.major);
@@ -714,16 +728,11 @@ export default function SchoolSetting() {
           };
         }),
       );
-      const currentMap = await fetchSingleMap(/* 현재 층 mapId */);
-      if (currentMap?.mapId) {
-        await updateMapToServer(currentMap.mapId, floorIdx);
-      }
-      await fetchBeacons();
-
       const mapId = floors[floorIdx]?.mapId;
       if (mapId) {
         await updateMapToServer(mapId, floorIdx);
       }
+      await fetchBeacons();
 
       setIsBeaconModalOpen(false);
       setPendingBeaconNat(null);
@@ -769,9 +778,9 @@ export default function SchoolSetting() {
     setElements((prev) => [...prev, newBeacon]);
     setSelectedId(id);
     setSelectedIds([id]);
-    const currentMap = await fetchSingleMap(/* 현재 층 mapId */);
-    if (currentMap?.mapId) {
-      await updateMapToServer(currentMap.mapId, floorIdx);
+    const mapId = floors[floorIdx]?.mapId;
+    if (mapId) {
+      await updateMapToServer(mapId, floorIdx);
     }
     await fetchBeacons();
 
@@ -1010,7 +1019,61 @@ export default function SchoolSetting() {
         return null;
       }
 
-      const outlineList = (floor.elements || []).filter(
+      const rawElements = floor.elements || [];
+
+      const normalizedElements = rawElements.map((el) => {
+        // 건물 윤곽은 points/rawPoints 중심으로 저장
+        if (el.type === "건물윤곽") {
+          return {
+            id: el.id,
+            type: el.type,
+            floor: el.floor ?? floorIdx,
+            points: Array.isArray(el.points) ? el.points : [],
+            rawPoints: Array.isArray(el.rawPoints) ? el.rawPoints : [],
+          };
+        }
+
+        // 비콘은 프론트 전용 필드(serverBeaconId, beaconUuid 등)를 최대한 빼고 저장
+        if (el.type === "비콘") {
+          return {
+            id: el.id,
+            type: el.type,
+            floor: el.floor ?? floorIdx,
+            x: Number(el.x ?? 0),
+            y: Number(el.y ?? 0),
+            width: Number(el.width ?? 28),
+            height: Number(el.height ?? 28),
+            beaconNo: Number(el.beaconNo ?? 0),
+            name: el.name || "",
+          };
+        }
+
+        // 문
+        if (el.type === "문") {
+          return {
+            id: el.id,
+            type: el.type,
+            floor: el.floor ?? floorIdx,
+            x: Number(el.x ?? 0),
+            y: Number(el.y ?? 0),
+            angle: Number(el.angle ?? 0),
+          };
+        }
+
+        // 일반 박스형 요소(방, 제한구역 등)
+        return {
+          id: el.id,
+          type: el.type,
+          floor: el.floor ?? floorIdx,
+          x: Number(el.x ?? 0),
+          y: Number(el.y ?? 0),
+          width: Number(el.width ?? 0),
+          height: Number(el.height ?? 0),
+          name: el.name || "",
+        };
+      });
+
+      const outlineList = normalizedElements.filter(
         (el) => el.type === "건물윤곽",
       );
 
@@ -1021,10 +1084,23 @@ export default function SchoolSetting() {
         scaleMPerPx: 0,
         originX: 0,
         originY: 0,
-        elementsJson: JSON.stringify(floor.elements || []),
+        elementsJson: JSON.stringify(normalizedElements),
       };
 
+      console.log("구조도 수정 전 rawElements =", rawElements);
+      console.log("구조도 수정 전 normalizedElements =", normalizedElements);
       console.log("구조도 수정 payload =", payload);
+      console.log("payload.floorIndex =", payload.floorIndex);
+      console.log("payload.floorLabel =", payload.floorLabel);
+      console.log("payload.outlineJson =", payload.outlineJson);
+      console.log("payload.elementsJson =", payload.elementsJson);
+
+      try {
+        const parsed = JSON.parse(payload.elementsJson);
+        console.log("parsed elementsJson =", parsed);
+      } catch (e) {
+        console.error("elementsJson 파싱 실패 =", e);
+      }
 
       try {
         const res = await axios.post(
@@ -1052,6 +1128,673 @@ export default function SchoolSetting() {
       }
     },
     [schoolId, floors, floorNames, authHeaders, showAxiosError],
+  );
+  const handleSaveAsTemplate = async () => {
+    if (!activeMapVersionId) {
+      alert("먼저 맵 버전을 선택하세요.");
+      return;
+    }
+
+    const templateName = prompt("템플릿 이름 입력");
+    if (!templateName) return;
+
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/rooms/${classroomId}/map-versions/${activeMapVersionId}/save-as-template`,
+        {
+          templateName,
+          description: "",
+        },
+        {
+          headers: { ...authHeaders },
+        },
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        alert("템플릿 저장 실패");
+        return;
+      }
+
+      alert("✅ 템플릿 저장 완료");
+    } catch (err) {
+      console.error(err);
+      alert("템플릿 저장 중 오류");
+    }
+  };
+  const applyAnalysisToMap = useCallback(
+    async (mapId, floorIdx) => {
+      if (!schoolId || !mapId) {
+        alert("schoolId 또는 mapId가 없습니다.");
+        return null;
+      }
+
+      const floor = floors[floorIdx];
+      if (!floor) {
+        alert("적용할 층 정보가 없습니다.");
+        return null;
+      }
+
+      const outlineList = (floor.elements || []).filter(
+        (el) => el.type === "건물윤곽",
+      );
+
+      const payload = {
+        outlineJson: JSON.stringify(outlineList),
+        elementsJson: JSON.stringify(floor.elements || []),
+      };
+
+      console.log("분석 결과 반영 payload =", payload);
+
+      try {
+        const res = await axios.post(
+          `${API_BASE}/api/channels/${schoolId}/maps/${mapId}/analysis/apply`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("분석 결과 반영 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("분석 결과 반영 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("분석 결과 반영 중 오류", err);
+        return null;
+      }
+    },
+    [schoolId, floors, authHeaders, showAxiosError],
+  );
+
+  const fetchMapElements = useCallback(
+    async (mapId) => {
+      if (!schoolId || !mapId) {
+        alert("schoolId 또는 mapId가 없습니다.");
+        return [];
+      }
+
+      try {
+        const res = await axios.get(
+          `${API_BASE}/api/channels/${schoolId}/maps/${mapId}/elements`,
+          {
+            headers: { ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("구조도 요소 목록 조회 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("구조도 요소 목록 조회 실패", res);
+          return [];
+        }
+
+        return Array.isArray(res.data) ? res.data : [];
+      } catch (err) {
+        console.error(err);
+        showAxiosError("구조도 요소 목록 조회 중 오류", err);
+        return [];
+      }
+    },
+    [schoolId, authHeaders, showAxiosError],
+  );
+
+  const fetchMapElementDetail = useCallback(
+    async (mapId, elementId) => {
+      if (!schoolId || !mapId || !elementId) {
+        alert("schoolId, mapId 또는 elementId가 없습니다.");
+        return null;
+      }
+
+      try {
+        const res = await axios.get(
+          `${API_BASE}/api/channels/${schoolId}/maps/${mapId}/elements/${elementId}`,
+          {
+            headers: { ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("구조도 요소 상세 조회 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("구조도 요소 상세 조회 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("구조도 요소 상세 조회 중 오류", err);
+        return null;
+      }
+    },
+    [schoolId, authHeaders, showAxiosError],
+  );
+
+  const updateMapElementMeta = useCallback(
+    async (mapId, elementId, { name, tagsJson }) => {
+      if (!schoolId || !mapId || !elementId) {
+        alert("schoolId, mapId 또는 elementId가 없습니다.");
+        return null;
+      }
+
+      const payload = {
+        name: name ?? "",
+        tagsJson:
+          typeof tagsJson === "string"
+            ? tagsJson
+            : JSON.stringify(tagsJson ?? []),
+      };
+
+      console.log("구조도 요소 수정 payload =", payload);
+
+      try {
+        const res = await axios.put(
+          `${API_BASE}/api/channels/${schoolId}/maps/${mapId}/elements/${elementId}`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("구조도 요소 수정 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("구조도 요소 수정 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("구조도 요소 수정 중 오류", err);
+        return null;
+      }
+    },
+    [schoolId, authHeaders, showAxiosError],
+  );
+  const createMapVersionFromChannel = useCallback(
+    async ({ channelMapId, label }) => {
+      if (!classroomId) {
+        alert("classroomId가 없습니다.");
+        return null;
+      }
+
+      const finalLabel = (label || "").trim();
+      if (!channelMapId) {
+        alert("channelMapId가 없습니다.");
+        return null;
+      }
+      if (!finalLabel) {
+        alert("맵 버전 이름(label)을 입력하세요.");
+        return null;
+      }
+
+      const payload = {
+        channelMapId,
+        label: finalLabel,
+        createdBy: userId || "",
+      };
+
+      console.log("단일 채널 맵 복사 payload =", payload);
+
+      try {
+        const res = await axios.post(
+          `${API_BASE}/api/rooms/${classroomId}/map-versions/from-channel`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("단일 채널 맵 복사 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("단일 채널 맵 복사 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("단일 채널 맵 복사 중 오류", err);
+        return null;
+      }
+    },
+    [classroomId, userId, authHeaders, showAxiosError],
+  );
+
+  const createMapVersionFromTemplate = useCallback(
+    async ({ templateId, label }) => {
+      if (!classroomId) {
+        alert("classroomId가 없습니다.");
+        return null;
+      }
+
+      const finalLabel = (label || "").trim();
+      if (!templateId) {
+        alert("templateId가 없습니다.");
+        return null;
+      }
+      if (!finalLabel) {
+        alert("맵 버전 이름(label)을 입력하세요.");
+        return null;
+      }
+
+      const payload = {
+        templateId,
+        label: finalLabel,
+        createdBy: userId || "",
+      };
+
+      console.log("템플릿 복사 payload =", payload);
+
+      try {
+        const res = await axios.post(
+          `${API_BASE}/api/rooms/${classroomId}/map-versions/from-template`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("템플릿 복사 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("템플릿으로 맵 버전 생성 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("템플릿으로 맵 버전 생성 중 오류", err);
+        return null;
+      }
+    },
+    [classroomId, userId, authHeaders, showAxiosError],
+  );
+
+  const saveMapVersionAsTemplate = useCallback(
+    async (mapVersionId, { templateName, description }) => {
+      if (!classroomId || !mapVersionId) {
+        alert("classroomId 또는 mapVersionId가 없습니다.");
+        return null;
+      }
+
+      const payload = {
+        templateName: (templateName || "").trim(),
+        description: (description || "").trim(),
+      };
+
+      if (!payload.templateName) {
+        alert("템플릿 이름을 입력하세요.");
+        return null;
+      }
+
+      console.log("맵 버전 템플릿 저장 payload =", payload);
+
+      try {
+        const res = await axios.post(
+          `${API_BASE}/api/rooms/${classroomId}/map-versions/${mapVersionId}/save-as-template`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("맵 버전 템플릿 저장 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("맵 버전 템플릿 저장 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("맵 버전 템플릿 저장 중 오류", err);
+        return null;
+      }
+    },
+    [classroomId, authHeaders, showAxiosError],
+  );
+  const fetchMapTemplates = useCallback(async () => {
+    console.log("템플릿 조회 schoolId =", schoolId);
+
+    if (!schoolId) {
+      setTemplates([]);
+      return;
+    }
+
+    try {
+      const res = await axios.get(
+        `${API_BASE}/api/schools/${schoolId}/map-templates`,
+        {
+          headers: { ...authHeaders },
+          timeout: 30000,
+          validateStatus: () => true,
+        },
+      );
+
+      console.log("템플릿 목록 조회 응답 =", res.status, res.data);
+      console.log("템플릿 저장 classroomId =", classroomId);
+      console.log("템플릿 저장 activeMapVersionId =", activeMapVersionId);
+      console.log("템플릿 저장 schoolId =", schoolId);
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        setTemplates([]);
+        showAxiosError("템플릿 목록 조회 실패", res);
+        return;
+      }
+
+      setTemplates(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error(err);
+      setTemplates([]);
+      showAxiosError("템플릿 목록 조회 중 오류", err);
+    }
+  }, [schoolId, authHeaders, showAxiosError]);
+
+  useEffect(() => {
+    if (!schoolId) return;
+    fetchMapTemplates();
+  }, [schoolId, fetchMapTemplates]);
+
+  const fetchMapTemplateDetail = useCallback(
+    async (templateId) => {
+      if (!schoolId || !templateId) {
+        alert("schoolId 또는 templateId가 없습니다.");
+        return null;
+      }
+
+      try {
+        const res = await axios.get(
+          `${API_BASE}/api/schools/${schoolId}/map-templates/${templateId}`,
+          {
+            headers: { ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("템플릿 상세 조회 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("템플릿 상세 조회 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("템플릿 상세 조회 중 오류", err);
+        return null;
+      }
+    },
+    [schoolId, authHeaders, showAxiosError],
+  );
+
+  useEffect(() => {
+    if (!isTemplateModalOpen) return;
+    if (!selectedTemplateId) {
+      setSelectedTemplateDetail(null);
+      return;
+    }
+
+    const run = async () => {
+      const detail = await fetchMapTemplateDetail(selectedTemplateId);
+      setSelectedTemplateDetail(detail);
+    };
+
+    run();
+  }, [isTemplateModalOpen, selectedTemplateId, fetchMapTemplateDetail]);
+
+  useEffect(() => {
+    if (!selectedTemplateDetail) {
+      setTemplateName("");
+      setTemplateDescription("");
+      return;
+    }
+
+    setTemplateName(
+      selectedTemplateDetail.templateName || selectedTemplateDetail.name || "",
+    );
+
+    setTemplateDescription(selectedTemplateDetail.description || "");
+  }, [selectedTemplateDetail]);
+
+  const updateMapTemplateMeta = useCallback(
+    async (templateId, { templateName, description }) => {
+      if (!schoolId || !templateId) {
+        alert("schoolId 또는 templateId가 없습니다.");
+        return null;
+      }
+
+      const payload = {
+        templateName: (templateName || "").trim(),
+        description: (description || "").trim(),
+      };
+
+      console.log("템플릿 수정 payload =", payload);
+
+      try {
+        const res = await axios.put(
+          `${API_BASE}/api/schools/${schoolId}/map-templates/${templateId}`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("템플릿 수정 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("템플릿 수정 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("템플릿 수정 중 오류", err);
+        return null;
+      }
+    },
+    [schoolId, authHeaders, showAxiosError],
+  );
+  const deleteMapTemplate = useCallback(
+    async (templateId) => {
+      if (!schoolId || !templateId) {
+        alert("schoolId 또는 templateId가 없습니다.");
+        return false;
+      }
+
+      try {
+        const res = await axios.delete(
+          `${API_BASE}/api/schools/${schoolId}/map-templates/${templateId}`,
+          {
+            headers: { ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("템플릿 삭제 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("템플릿 삭제 실패", res);
+          return false;
+        }
+
+        return true;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("템플릿 삭제 중 오류", err);
+        return false;
+      }
+    },
+    [schoolId, authHeaders, showAxiosError],
+  );
+
+  const handleDeleteTemplate = useCallback(
+    async (templateId) => {
+      if (!templateId) {
+        alert("삭제할 templateId가 없습니다.");
+        return;
+      }
+
+      const ok = window.confirm("이 템플릿을 삭제하시겠습니까?");
+      if (!ok) return;
+
+      const success = await deleteMapTemplate(templateId);
+      if (!success) return;
+
+      if (selectedTemplateId === templateId) {
+        setSelectedTemplateId(null);
+        setSelectedTemplateDetail(null);
+      }
+
+      await fetchMapTemplates();
+      alert("✅ 템플릿이 삭제되었습니다.");
+    },
+    [
+      deleteMapTemplate,
+      fetchMapTemplates,
+      selectedTemplateId,
+      setSelectedTemplateId,
+      setSelectedTemplateDetail,
+    ],
+  );
+
+  const createMapVersionFromChannelSet = useCallback(
+    async (label) => {
+      if (!classroomId) {
+        alert("classroomId가 없습니다.");
+        return null;
+      }
+
+      if (!schoolId) {
+        alert("schoolId가 없습니다.");
+        return null;
+      }
+
+      const finalLabel = (label || "").trim();
+      if (!finalLabel) {
+        alert("맵 버전 이름(label)을 입력하세요.");
+        return null;
+      }
+
+      const payload = {
+        schoolId,
+        label: finalLabel,
+        createdByUserId: userId || "",
+      };
+
+      console.log("채널 전체 구조도 세트 복사 payload =", payload);
+
+      try {
+        const res = await axios.post(
+          `${API_BASE}/api/rooms/${classroomId}/map-versions/from-channel-set`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("채널 전체 구조도 세트 복사 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("채널 구조도 세트 복사 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("채널 구조도 세트 복사 중 오류", err);
+        return null;
+      }
+    },
+    [classroomId, schoolId, userId, authHeaders, showAxiosError],
+  );
+
+  const simulateBeaconDetect = useCallback(
+    async ({
+      scenarioId,
+      classroomId: reqClassroomId,
+      studentId,
+      beaconId,
+      rssi,
+      updateLocation = true,
+      saveEvent = true,
+      note = "",
+    }) => {
+      if (!scenarioId) {
+        alert("scenarioId가 없습니다.");
+        return null;
+      }
+
+      const payload = {
+        classroomId: reqClassroomId ?? classroomId,
+        studentId,
+        beaconId,
+        rssi,
+        updateLocation,
+        saveEvent,
+        note,
+      };
+
+      console.log("비콘 감지 시뮬레이션 payload =", payload);
+
+      try {
+        const res = await axios.post(
+          `${API_BASE}/api/scenarios/${scenarioId}/simulate-beacon-detect`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 30000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("비콘 감지 시뮬레이션 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("비콘 감지 시뮬레이션 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("비콘 감지 시뮬레이션 중 오류", err);
+        return null;
+      }
+    },
+    [classroomId, authHeaders, showAxiosError],
   );
 
   const deleteMapFromServer = useCallback(
@@ -1215,6 +1958,52 @@ export default function SchoolSetting() {
     },
     [classroomId, authHeaders, showAxiosError],
   );
+
+  const updateMapVersionOnServer = useCallback(
+    async (mapVersionId, { label, floorsJson }) => {
+      if (!classroomId || !mapVersionId) {
+        alert("classroomId 또는 mapVersionId가 없습니다.");
+        return null;
+      }
+
+      const payload = {
+        label: label ?? "",
+        floorsJson:
+          typeof floorsJson === "string"
+            ? floorsJson
+            : JSON.stringify(floorsJson ?? []),
+      };
+
+      console.log("맵 버전 수정 payload =", payload);
+
+      try {
+        const res = await axios.put(
+          `${API_BASE}/api/rooms/${classroomId}/map-versions/${mapVersionId}`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("맵 버전 수정 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("맵 버전 수정 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error(err);
+        showAxiosError("맵 버전 수정 중 오류", err);
+        return null;
+      }
+    },
+    [classroomId, authHeaders, showAxiosError],
+  );
+
   const saveMapVersionToServer = useCallback(async () => {
     if (!classroomId) {
       alert("classroomId가 없습니다.");
@@ -1232,14 +2021,31 @@ export default function SchoolSetting() {
       return;
     }
 
-    const payload = {
-      schoolId,
-      label,
-      createdBy: userId || "",
-      floorsJson: JSON.stringify(buildFloorsPayload()),
-    };
+    const floorsJson = JSON.stringify(buildFloorsPayload());
 
     try {
+      if (selectedPlanId) {
+        const updated = await updateMapVersionOnServer(selectedPlanId, {
+          label,
+          floorsJson,
+        });
+
+        if (!updated) return;
+
+        await fetchMapVersions();
+        setSavePlanName("");
+        setIsSavePlanModalOpen(false);
+        alert("✅ 맵 버전이 수정되었습니다.");
+        return;
+      }
+
+      const payload = {
+        schoolId,
+        label,
+        createdBy: userId || "",
+        floorsJson,
+      };
+
       const res = await axios.post(
         `${API_BASE}/api/rooms/${classroomId}/map-versions`,
         payload,
@@ -1283,9 +2089,10 @@ export default function SchoolSetting() {
     showAxiosError,
     fetchMapVersions,
     setActiveMapToServer,
+    selectedPlanId,
+    updateMapVersionOnServer,
   ]);
 
-  // ✅ 여기 추가
   useEffect(() => {
     if (!isPlanModalOpen) return;
     if (!mapVersions.length) return;
@@ -2760,6 +3567,16 @@ export default function SchoolSetting() {
               <button onClick={() => setShowHelp((p) => !p)} className={btnSub}>
                 {showHelp ? "사용 방법 닫기" : "사용 방법"}
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsTemplateModalOpen(true);
+                  fetchMapTemplates();
+                }}
+                className="px-4 py-2 rounded-lg bg-white border border-green-600 text-green-700 font-semibold hover:bg-green-50"
+              >
+                템플릿 관리
+              </button>
             </div>
 
             {/* 층 이동/이름 */}
@@ -2898,6 +3715,13 @@ export default function SchoolSetting() {
                 className="px-4 py-2 rounded bg-[#2E7D32] text-white font-bold shadow hover:bg-[#256428] disabled:opacity-60"
               >
                 저장
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAsTemplate}
+                className="px-4 py-2 rounded-lg bg-white border border-green-600 text-green-700 font-semibold hover:bg-green-50"
+              >
+                템플릿으로 저장
               </button>
             </div>
           </div>
@@ -3693,6 +4517,168 @@ export default function SchoolSetting() {
               >
                 저장
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {isTemplateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-3xl rounded-2xl bg-white shadow-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-2xl font-bold text-[#2E7D32]">템플릿 관리</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsTemplateModalOpen(false);
+                  setSelectedTemplateId(null);
+                  setSelectedTemplateDetail(null);
+                }}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                닫기
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-6">
+              {/* 왼쪽: 템플릿 목록 */}
+              <div className="border rounded-xl p-4 bg-gray-50">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-lg font-semibold">템플릿 목록</h4>
+                  <button
+                    type="button"
+                    onClick={fetchMapTemplates}
+                    className="px-3 py-2 rounded-lg border border-green-600 text-green-700 hover:bg-green-50"
+                  >
+                    새로고침
+                  </button>
+                </div>
+
+                {templates.length === 0 ? (
+                  <p className="text-sm text-gray-500">
+                    저장된 템플릿이 없습니다.
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-[420px] overflow-y-auto">
+                    {templates.map((tpl) => {
+                      const templateId =
+                        tpl.templateId || tpl.id || tpl.mapTemplateId || "";
+
+                      const templateTitle =
+                        tpl.templateName || tpl.name || "이름 없는 템플릿";
+
+                      return (
+                        <div
+                          key={templateId}
+                          className={`rounded-xl border p-3 ${
+                            selectedTemplateId === templateId
+                              ? "border-green-600 bg-green-50"
+                              : "border-gray-200 bg-white"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTemplateId(templateId)}
+                              className="flex-1 text-left"
+                            >
+                              <div className="font-semibold text-gray-900">
+                                {templateTitle}
+                              </div>
+                              <div className="text-sm text-gray-500 mt-1">
+                                {tpl.description || "설명 없음"}
+                              </div>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTemplate(templateId)}
+                              className="shrink-0 px-3 py-2 rounded-lg border border-red-500 text-red-600 hover:bg-red-50"
+                            >
+                              삭제
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 오른쪽: 선택 템플릿 상세 */}
+              <div className="border rounded-xl p-4 bg-white">
+                <h4 className="text-lg font-semibold mb-3">템플릿 상세</h4>
+
+                {!selectedTemplateDetail ? (
+                  <p className="text-sm text-gray-500">
+                    왼쪽에서 템플릿을 선택하세요.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">
+                        템플릿 이름
+                      </label>
+                      <input
+                        type="text"
+                        value={templateName}
+                        onChange={(e) => setTemplateName(e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2"
+                        placeholder="템플릿 이름"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">
+                        설명
+                      </label>
+                      <textarea
+                        value={templateDescription}
+                        onChange={(e) => setTemplateDescription(e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 min-h-[120px]"
+                        placeholder="템플릿 설명"
+                      />
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!selectedTemplateId) {
+                            alert("수정할 템플릿을 먼저 선택하세요.");
+                            return;
+                          }
+
+                          const updated = await updateMapTemplateMeta(
+                            selectedTemplateId,
+                            {
+                              templateName,
+                              description: templateDescription,
+                            },
+                          );
+
+                          if (!updated) return;
+
+                          await fetchMapTemplates();
+                          const detail =
+                            await fetchMapTemplateDetail(selectedTemplateId);
+                          setSelectedTemplateDetail(detail);
+                          alert("✅ 템플릿이 수정되었습니다.");
+                        }}
+                        className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700"
+                      >
+                        수정 저장
+                      </button>
+                    </div>
+
+                    <div className="text-xs text-gray-500 pt-2 border-t">
+                      선택된 템플릿 ID:{" "}
+                      {selectedTemplateDetail.templateId ||
+                        selectedTemplateDetail.id ||
+                        selectedTemplateId}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

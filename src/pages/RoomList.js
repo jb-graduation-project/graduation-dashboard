@@ -130,22 +130,25 @@ function RoomList() {
         },
       );
 
+      console.log("채널 코드 재발급 응답 =", res.status, res.data);
+
       if (!(res.status >= 200 && res.status < 300)) {
         showAxiosError("채널 코드 재발급 실패", res);
         return;
       }
 
-      // 백엔드 응답 형태 대응
       const newCode =
-        res.data?.roomCode ||
-        res.data?.schoolCode ||
-        res.data?.accessCode ||
-        res.data?.joinCode ||
-        res.data?.code ||
-        "없음";
+        typeof res.data === "string"
+          ? res.data.trim()
+          : res.data?.roomCode ||
+            res.data?.schoolCode ||
+            res.data?.accessCode ||
+            res.data?.joinCode ||
+            res.data?.code ||
+            "없음";
 
-      setSchoolCode(newCode);
-      alert(`채널 코드가 재발급되었습니다.\n새 코드: ${newCode}`);
+      setSchoolCode(newCode || "없음");
+      alert(`채널 코드가 재발급되었습니다.\n새 코드: ${newCode || "없음"}`);
     } catch (e) {
       console.error("채널 코드 재발급 실패:", e);
       showAxiosError("채널 코드 재발급 중 오류", e);
@@ -153,7 +156,6 @@ function RoomList() {
       setCodeLoading(false);
     }
   }, [schoolId, authHeaders, showAxiosError]);
-
   const handleCreateRoom = async () => {
     const className = newRoomName.trim();
     if (!className) return;

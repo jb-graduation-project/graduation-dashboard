@@ -277,6 +277,27 @@ function ScenarioManagement() {
       }
 
       alert("✅ 시나리오가 생성되었습니다.");
+      const createdScenarioId = res.data?.scenarioId || res.data?.id || null;
+      if (createdScenarioId) {
+        await recordScenarioAction({
+          scenarioId: createdScenarioId,
+          classroomId,
+          studentId: "",
+          actionType: "SCENARIO_CREATED",
+          floorIndex: 0,
+          elementId: "",
+          beaconId: "",
+          valueInt: 0,
+          valueText: scenarioName?.trim() || "",
+          metaJson: {
+            scenarioType: disasterType,
+            triggerMode: fireSetting,
+            teamMode: teamSetting,
+            npcMode: npcSetting,
+          },
+        });
+      }
+
       await fetchScenarioList();
     } catch (err) {
       console.error(err);
@@ -331,6 +352,187 @@ function ScenarioManagement() {
       showAxiosError("시나리오 수정 중 오류", err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ✅ 시나리오 액션 이벤트 기록 (UI 노출 없이 데이터 기록용)
+  const recordScenarioAction = async ({
+    scenarioId,
+    classroomId: reqClassroomId,
+    studentId,
+    actionType,
+    floorIndex = 0,
+    elementId = "",
+    beaconId = "",
+    valueInt = 0,
+    valueText = "",
+    metaJson = "",
+  }) => {
+    if (!scenarioId) {
+      console.warn("recordScenarioAction: scenarioId가 없습니다.");
+      return null;
+    }
+
+    const payload = {
+      classroomId: reqClassroomId || classroomId,
+      studentId: studentId || "",
+      actionType: actionType || "",
+      floorIndex: Number(floorIndex || 0),
+      elementId: elementId || "",
+      beaconId: beaconId || "",
+      valueInt: Number(valueInt || 0),
+      valueText: valueText || "",
+      metaJson:
+        typeof metaJson === "string"
+          ? metaJson
+          : JSON.stringify(metaJson || {}),
+    };
+
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/scenarios/${scenarioId}/actions`,
+        payload,
+        axiosConfig,
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        console.error("시나리오 액션 기록 실패 =", res.status, res.data);
+        return null;
+      }
+
+      return res.data || null;
+    } catch (err) {
+      console.error("시나리오 액션 기록 중 오류 =", err);
+      return null;
+    }
+  };
+
+  // ✅ 호출형 미션 시작
+  const startScenarioCallMission = async ({
+    scenarioId,
+    studentId,
+    assignmentId,
+  }) => {
+    if (!scenarioId) {
+      console.warn("startScenarioCallMission: scenarioId가 없습니다.");
+      return null;
+    }
+
+    const payload = {
+      studentId: studentId || "",
+      assignmentId: assignmentId || "",
+    };
+
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/scenarios/${scenarioId}/call/start`,
+        payload,
+        axiosConfig,
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        console.error("호출형 미션 시작 실패 =", res.status, res.data);
+        return null;
+      }
+
+      return res.data || null;
+    } catch (err) {
+      console.error("호출형 미션 시작 중 오류 =", err);
+      return null;
+    }
+  };
+
+  // ✅ 호출형 미션 종료
+  const endScenarioCallMission = async ({
+    scenarioId,
+    studentId,
+    assignmentId,
+    success,
+  }) => {
+    if (!scenarioId) {
+      console.warn("endScenarioCallMission: scenarioId가 없습니다.");
+      return null;
+    }
+
+    const payload = {
+      studentId: studentId || "",
+      assignmentId: assignmentId || "",
+      success: !!success,
+    };
+
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/scenarios/${scenarioId}/call/end`,
+        payload,
+        axiosConfig,
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        console.error("호출형 미션 종료 실패 =", res.status, res.data);
+        return null;
+      }
+
+      return res.data || null;
+    } catch (err) {
+      console.error("호출형 미션 종료 중 오류 =", err);
+      return null;
+    }
+  };
+
+  // ✅ 시나리오 평가 실행
+  const evaluateScenario = async (scenarioId) => {
+    if (!scenarioId) {
+      alert("평가할 scenarioId가 없습니다.");
+      return null;
+    }
+
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/scenarios/${scenarioId}/evaluate`,
+        {},
+        axiosConfig,
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("시나리오 평가 실행 실패", res);
+        return null;
+      }
+
+      return res.data || null;
+    } catch (err) {
+      console.error(err);
+      showAxiosError("시나리오 평가 실행 중 오류", err);
+      return null;
+    }
+  };
+
+  // ✅ 시나리오 평가 결과 조회
+  const fetchScenarioEvaluations = async (scenarioId) => {
+    if (!scenarioId) {
+      alert("조회할 scenarioId가 없습니다.");
+      return null;
+    }
+
+    try {
+      const res = await axios.get(
+        `${API_BASE}/api/scenarios/${scenarioId}/evaluations`,
+        {
+          headers: { ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("시나리오 평가 결과 조회 실패", res);
+        return null;
+      }
+
+      return res.data || null;
+    } catch (err) {
+      console.error(err);
+      showAxiosError("시나리오 평가 결과 조회 중 오류", err);
+      return null;
     }
   };
 

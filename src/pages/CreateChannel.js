@@ -123,12 +123,26 @@ function CreateChannel() {
         validateStatus: () => true,
       });
 
+      // ❗ 실패 처리
       if (!(res.status >= 200 && res.status < 300)) {
         const msg =
           res.data?.message ||
           res.data?.detail ||
           (typeof res.data === "string" ? res.data : null) ||
           `채널 생성 실패 (${res.status})`;
+
+        console.log("채널 생성 실패 응답 =", res.status, res.data);
+
+        // 🔥 핵심: 중복 이름 처리
+        if (
+          msg.includes("이미 존재") ||
+          msg.includes("duplicate") ||
+          msg.includes("중복")
+        ) {
+          alert("이미 존재하는 학교 이름입니다. 다른 이름을 입력해주세요.");
+          return;
+        }
+
         alert(msg);
         return;
       }
