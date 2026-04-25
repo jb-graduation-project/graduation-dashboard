@@ -278,6 +278,22 @@ function ScenarioManagement() {
 
       alert("✅ 시나리오가 생성되었습니다.");
       const createdScenarioId = res.data?.scenarioId || res.data?.id || null;
+
+      const prev = JSON.parse(localStorage.getItem("gameContext") || "{}");
+
+      localStorage.setItem(
+        "gameContext",
+        JSON.stringify({
+          ...prev,
+          classroomId,
+          scenarioId: createdScenarioId,
+          activeScenarioId: createdScenarioId,
+          scenarioType: payload.scenarioType,
+        }),
+      );
+
+      setSelectedScenarioId(createdScenarioId);
+
       if (createdScenarioId) {
         await recordScenarioAction({
           scenarioId: createdScenarioId,
@@ -551,6 +567,19 @@ function ScenarioManagement() {
 
     setFireLocation(s.location || "");
     setTrainingTime(s.trainTime ? String(s.trainTime) : "");
+    const prev = JSON.parse(localStorage.getItem("gameContext") || "{}");
+    localStorage.setItem(
+      "gameContext",
+      JSON.stringify({
+        ...prev,
+        classroomId,
+        scenarioId: s.id,
+        activeScenarioId: s.id,
+        scenarioType: s.scenarioType,
+      }),
+    );
+
+    alert("✅ 시작할 시나리오로 선택되었습니다.");
 
     try {
       const ta = s.teamAssignmentJson ? JSON.parse(s.teamAssignmentJson) : {};

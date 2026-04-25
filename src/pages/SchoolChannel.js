@@ -401,11 +401,11 @@ function SchoolChannel() {
     try {
       setLoading(true);
 
+      const started = await handleTrainingStart();
+      if (!started) return;
+
       const context = await fetchGameStartContext();
       if (!context) return;
-
-      const started = await handleTrainingStart(context);
-      if (!started) return;
 
       alert("게임 시작 데이터 로딩 완료!");
       // navigate("/game", { state: context });
@@ -492,57 +492,6 @@ function SchoolChannel() {
             </div>
           </div>
         </div>
-
-        {gameContext && (
-          <div className="mb-6 bg-white rounded-2xl p-5 shadow border border-[#C8E6C9]">
-            <h3 className="text-xl font-bold text-[#2E7D32] mb-3">
-              게임 시작 정보
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-700">
-              <div>
-                <span className="font-semibold">classroomId:</span>{" "}
-                {gameContext.classroomId || "-"}
-              </div>
-              <div>
-                <span className="font-semibold">scenarioId:</span>{" "}
-                {gameContext.scenarioId || gameContext.activeScenarioId || "-"}
-              </div>
-              <div>
-                <span className="font-semibold">scenarioType:</span>{" "}
-                {gameContext.scenarioType || "-"}
-              </div>
-              <div>
-                <span className="font-semibold">trainingState:</span>{" "}
-                {gameContext.trainingState || "-"}
-              </div>
-              <div>
-                <span className="font-semibold">trainingStartedAt:</span>{" "}
-                {gameContext.trainingStartedAt || "-"}
-              </div>
-              <div>
-                <span className="font-semibold">trainingEndedAt:</span>{" "}
-                {gameContext.trainingEndedAt || "-"}
-              </div>
-              <div>
-                <span className="font-semibold">activeMapVersionId:</span>{" "}
-                {gameContext.activeMapVersionId || "-"}
-              </div>
-              <div>
-                <span className="font-semibold">floorsJson:</span>{" "}
-                {gameContext.floorsJson ? "있음" : "-"}
-              </div>
-              <div>
-                <span className="font-semibold">npcPositionsJson:</span>{" "}
-                {gameContext.npcPositionsJson ? "있음" : "-"}
-              </div>
-              <div>
-                <span className="font-semibold">teamAssignmentJson:</span>{" "}
-                {gameContext.teamAssignmentJson ? "있음" : "-"}
-              </div>
-            </div>
-          </div>
-        )}
 
         <div className="mb-6">
           <h3 className="text-2xl font-bold text-[#2E7D32] mb-3">학생 목록</h3>

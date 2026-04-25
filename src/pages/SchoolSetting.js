@@ -15,11 +15,25 @@ const API_BASE = "https://disasterar.onenyang.shop";
 export default function SchoolSetting() {
   const location = useLocation();
 
+  useEffect(() => {
+    const id =
+      location.state?.classroomId ||
+      location.state?.roomId ||
+      location.state?.classroomID ||
+      null;
+
+    if (id) {
+      localStorage.setItem("classroomId", id);
+    }
+  }, [location.state]);
+
   const classroomId = useMemo(() => {
     return (
       location.state?.classroomId ||
       location.state?.roomId ||
       location.state?.classroomID ||
+      localStorage.getItem("classroomId") ||
+      localStorage.getItem("roomId") ||
       null
     );
   }, [location.state]);
@@ -872,6 +886,12 @@ export default function SchoolSetting() {
       console.error(err);
     }
   }, [classroomId, authHeaders]);
+
+  useEffect(() => {
+    if (!classroomId) return;
+    fetchActiveMap();
+  }, [classroomId, fetchActiveMap]);
+
   const fetchSchoolMaps = useCallback(async () => {
     if (!schoolId) return;
 
@@ -1103,7 +1123,7 @@ export default function SchoolSetting() {
       }
 
       try {
-        const res = await axios.post(
+        const res = await axios.put(
           `${API_BASE}/api/channels/${schoolId}/maps/${mapId}`,
           payload,
           {
@@ -1912,6 +1932,7 @@ export default function SchoolSetting() {
         }
 
         setActiveMapVersionId(mapVersionId);
+        localStorage.setItem("activeMapVersionId", mapVersionId);
         alert("✅ 활성 맵이 변경되었습니다.");
         await fetchMapVersions();
         await fetchActiveMap();
@@ -3637,10 +3658,19 @@ export default function SchoolSetting() {
               <button
                 onClick={() => {
                   const curr = floors[currentFloorIndex];
+
                   if (!curr?.mapId) {
                     alert("자동 분석할 구조도 mapId가 없습니다.");
                     return;
                   }
+
+                  if (!curr?.imageSrc) {
+                    alert(
+                      "자동 분석할 이미지가 없습니다. 구조도 이미지를 먼저 업로드하세요.",
+                    );
+                    return;
+                  }
+
                   runAutoAnalyze(currentFloorIndex);
                 }}
                 className="w-[200px] h-[52px] rounded-xl bg-[#5E8B45] text-white font-extrabold hover:opacity-90"

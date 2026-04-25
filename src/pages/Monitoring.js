@@ -1,11 +1,36 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Navbar from "../components/Navbar";
 
 function Monitoring() {
   const [students, setStudents] = useState([]);
   const [backgroundImage, setBackgroundImage] = useState(null);
 
-  // 예시 데이터
+  const classroomId = useMemo(() => {
+    return (
+      localStorage.getItem("classroomId") ||
+      localStorage.getItem("roomId") ||
+      ""
+    );
+  }, []);
+
+  const activeMapVersionId = useMemo(() => {
+    return localStorage.getItem("activeMapVersionId") || "";
+  }, []);
+
+  const unityUrl = useMemo(() => {
+    const params = new URLSearchParams();
+
+    if (classroomId) params.set("classroomId", classroomId);
+    if (activeMapVersionId)
+      params.set("activeMapVersionId", activeMapVersionId);
+
+    return `/WebGL/index.html?${params.toString()}`;
+  }, [classroomId, activeMapVersionId]);
+
+  console.log("Monitoring classroomId =", classroomId);
+  console.log("Monitoring activeMapVersionId =", activeMapVersionId);
+  console.log("Monitoring unityUrl =", unityUrl);
+
   useEffect(() => {
     const exampleStudents = [
       { id: 1, name: "학생A", x: 50, y: 80, status: "대피 중" },
@@ -25,12 +50,8 @@ function Monitoring() {
   };
 
   const getStatusClassName = (status) => {
-    if (status === "대피 중") {
-      return "bg-green-200 text-green-800";
-    }
-    if (status === "제한 구역 진입") {
-      return "bg-yellow-200 text-yellow-800";
-    }
+    if (status === "대피 중") return "bg-green-200 text-green-800";
+    if (status === "제한 구역 진입") return "bg-yellow-200 text-yellow-800";
     return "bg-red-200 text-red-800";
   };
 
@@ -42,12 +63,12 @@ function Monitoring() {
         <h2 className="text-3xl font-bold text-[#2E7D32] mb-2">
           실시간 모니터링
         </h2>
+
         <p className="text-gray-600">
           대피도 기반 실시간 위치 모니터링과 메타버스 공간 화면을 함께 확인할 수
           있습니다.
         </p>
 
-        {/* 대피도 업로드 */}
         <div className="bg-white border rounded shadow p-4">
           <label className="block font-medium mb-2">대피도 업로드</label>
           <input
@@ -58,9 +79,7 @@ function Monitoring() {
           />
         </div>
 
-        {/* 메인 영역 */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          {/* 왼쪽: 2D 모니터링 */}
           <div className="bg-white border rounded shadow p-4 flex flex-col">
             <h3 className="text-xl font-semibold text-[#2E7D32] mb-4">
               2D 모니터링 화면
@@ -79,7 +98,6 @@ function Monitoring() {
                 </div>
               )}
 
-              {/* 학생 위치 표시 */}
               {backgroundImage &&
                 students.map((student) => (
                   <div
@@ -97,7 +115,6 @@ function Monitoring() {
             </div>
           </div>
 
-          {/* 오른쪽: Unity WebGL */}
           <div className="bg-white border rounded shadow p-4 flex flex-col">
             <h3 className="text-xl font-semibold text-[#2E7D32] mb-4">
               3D 메타버스 화면
@@ -105,7 +122,8 @@ function Monitoring() {
 
             <div className="w-full h-[600px] border rounded overflow-hidden bg-black">
               <iframe
-                src="/WebGL/index.html"
+                key={unityUrl}
+                src={unityUrl}
                 width="100%"
                 height="100%"
                 style={{ border: "none" }}
@@ -115,7 +133,6 @@ function Monitoring() {
           </div>
         </div>
 
-        {/* 하단 현재 현황 */}
         <div className="bg-white p-4 rounded shadow">
           <h3 className="text-xl font-semibold text-[#2E7D32] mb-4">
             현재 현황
