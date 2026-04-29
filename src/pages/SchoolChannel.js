@@ -84,6 +84,23 @@ function SchoolChannel() {
     setGameContext(data);
   };
 
+  const getStudentDisplayStatus = (student) => {
+    if (student.status && student.status !== "UNKNOWN") {
+      if (student.status === "EVACUATING") return "대피 중";
+      if (student.status === "EVACUATED") return "대피 완료";
+      if (student.status === "RESTRICTED") return "제한됨";
+      return student.status;
+    }
+
+    const trainingState = student.trainingState || gameContext?.trainingState;
+
+    if (trainingState === "WAITING") return "훈련 대기중";
+    if (trainingState === "RUNNING") return "훈련 진행중";
+    if (trainingState === "ENDED") return "훈련 종료";
+
+    return "훈련 대기중";
+  };
+
   const fetchStudents = useCallback(async () => {
     if (!classroomId) {
       setStudents([]);
@@ -102,6 +119,8 @@ function SchoolChannel() {
           validateStatus: () => true,
         },
       );
+
+      console.log("students response:", res.data);
 
       if (!(res.status >= 200 && res.status < 300)) {
         showError("학생 목록 조회 실패", res);
@@ -139,6 +158,9 @@ function SchoolChannel() {
           validateStatus: () => true,
         },
       );
+
+      console.log("game-start-context classroomId =", classroomId);
+      console.log("game-start-context 응답 =", res.status, res.data);
 
       if (!(res.status >= 200 && res.status < 300)) {
         showError("게임 시작 데이터 조회 실패", res);
@@ -289,22 +311,90 @@ function SchoolChannel() {
     }
   };
 
+  // 활성 시나리오 서버 반영
+  const setActiveScenarioToServer = async (scenarioId) => {
+    if (!classroomId || !scenarioId) return false;
+
+    const res = await axios.put(
+      `${API_BASE}/api/rooms/${classroomId}/active-scenario`,
+      { scenarioId },
+      {
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        timeout: 10000,
+        validateStatus: () => true,
+      },
+    );
+
+    if (!(res.status >= 200 && res.status < 300)) {
+      showError("활성 시나리오 설정 실패", res);
+      return false;
+    }
+
+    return true;
+  };
+
+  const validateTrainingStart = async () => {
+    const errors = [];
+
+    if (!classroomId) {
+      errors.push("교실 정보가 없습니다.");
+    }
+
+    if (!students || students.length === 0) {
+      errors.push(
+        "입장한 학생이 없습니다. 학생이 최소 1명 이상 입장해야 합니다.",
+      );
+    }
+
+    const context = await fetchGameStartContext();
+
+    if (!context) {
+      errors.push("게임 시작 정보를 불러오지 못했습니다.");
+      return { ok: false, errors, context: null };
+    }
+
+    const scenarioId = context.scenarioId || context.activeScenarioId;
+    const activeMapVersionId = context.activeMapVersionId;
+
+    if (!scenarioId) {
+      errors.push(
+        "시작할 시나리오가 선택되지 않았습니다. 시나리오 관리에서 시나리오를 먼저 선택하세요.",
+      );
+    }
+
+    if (!activeMapVersionId) {
+      errors.push(
+        "활성 구조도가 없습니다. 구조도 설정에서 맵 버전을 저장한 뒤 '활성 맵 적용'을 먼저 해주세요.",
+      );
+    }
+
+    return {
+      ok: errors.length === 0,
+      errors,
+      context,
+    };
+  };
+
   const handleTrainingStart = async (contextData = null) => {
     if (!classroomId) {
       alert("classroomId 없음");
       return false;
     }
 
+    // ✅ 여기 추가 (핵심)
     const stored = contextData || getStoredGameContext();
+
     const scenarioId = stored?.scenarioId || stored?.activeScenarioId || null;
+
     const startedAt = getIsoNow();
 
+    // ✅ payload는 반드시 이 아래에 있어야 함
     const payload = {
       classroomId: String(classroomId),
-      trainingState: "IN_PROGRESS",
+      trainingState: "RUNNING",
       trainingStartedAt: startedAt,
       trainingEndedAt: null,
-      activeScenarioId: scenarioId,
+      scenarioId: scenarioId,
     };
 
     try {
@@ -326,8 +416,8 @@ function SchoolChannel() {
       const nextContext = {
         ...stored,
         classroomId: stored?.classroomId || String(classroomId),
-        scenarioId: stored?.scenarioId || scenarioId,
-        trainingState: res.data?.trainingState || "IN_PROGRESS",
+        scenarioId: res.data?.scenarioId || stored?.scenarioId || scenarioId,
+        trainingState: res.data?.trainingState || "RUNNING",
         trainingStartedAt: res.data?.trainingStartedAt || startedAt,
         trainingEndedAt: res.data?.trainingEndedAt || null,
         activeScenarioId: res.data?.activeScenarioId || scenarioId,
@@ -401,7 +491,31 @@ function SchoolChannel() {
     try {
       setLoading(true);
 
-      const started = await handleTrainingStart();
+      const stored = getStoredGameContext();
+      const scenarioId = stored?.scenarioId || stored?.activeScenarioId || null;
+
+      if (!scenarioId) {
+        alert(
+          "시작할 시나리오가 선택되지 않았습니다. 시나리오 관리에서 시나리오를 먼저 선택하세요.",
+        );
+        return;
+      }
+
+      // 🔥 여기 핵심 추가
+      const activeSet = await setActiveScenarioToServer(scenarioId);
+      if (!activeSet) return;
+
+      const validation = await validateTrainingStart();
+
+      if (!validation.ok) {
+        alert(
+          "❌ 훈련을 시작할 수 없습니다.\n\n" +
+            validation.errors.map((e, i) => `${i + 1}. ${e}`).join("\n"),
+        );
+        return;
+      }
+
+      const started = await handleTrainingStart(validation.context);
       if (!started) return;
 
       const context = await fetchGameStartContext();
@@ -476,7 +590,7 @@ function SchoolChannel() {
 
               <button
                 onClick={handleGameStart}
-                disabled={loading || !classroomId}
+                disabled={loading || !classroomId || students.length === 0}
                 className="px-4 py-2 bg-[#FBC02D] text-white font-bold rounded-lg shadow hover:bg-[#F9A825] disabled:opacity-60"
               >
                 {loading ? "처리 중..." : "훈련 시작"}
@@ -520,7 +634,7 @@ function SchoolChannel() {
                       {student.studentName || "이름 없음"}
                     </div>
                     <div className="text-sm text-gray-600 mt-1">
-                      상태: {student.status || "-"}
+                      상태: {getStudentDisplayStatus(student)}
                     </div>
                   </div>
 

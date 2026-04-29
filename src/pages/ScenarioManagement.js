@@ -371,6 +371,14 @@ function ScenarioManagement() {
     }
   };
 
+  const handleSaveScenario = async () => {
+    if (selectedScenarioId) {
+      await handleUpdateScenario();
+    } else {
+      await handleCreateScenario();
+    }
+  };
+
   // ✅ 시나리오 액션 이벤트 기록 (UI 노출 없이 데이터 기록용)
   const recordScenarioAction = async ({
     scenarioId,
@@ -871,20 +879,38 @@ function ScenarioManagement() {
         {/* 저장 버튼들 */}
         <div className="mt-4 flex flex-wrap gap-3">
           <button
-            onClick={handleCreateScenario}
+            onClick={handleSaveScenario}
             disabled={saving || !classroomId}
             className="px-6 py-3 bg-[#2E7D32] text-white rounded-lg shadow disabled:opacity-60"
           >
-            {saving ? "처리 중..." : "시나리오 생성"}
+            {saving
+              ? "처리 중..."
+              : selectedScenarioId
+                ? "수정 저장"
+                : "시나리오 저장"}
           </button>
 
-          <button
-            onClick={handleUpdateScenario}
-            disabled={saving || !selectedScenarioId || !classroomId}
-            className="px-6 py-3 bg-[#66BB6A] text-white rounded-lg shadow disabled:opacity-60"
-          >
-            {saving ? "처리 중..." : "선택 시나리오 수정"}
-          </button>
+          {selectedScenarioId && (
+            <button
+              onClick={() => {
+                setSelectedScenarioId(null);
+                setScenarioName("");
+                setDisasterType("지진");
+                setFireSetting("자동설정");
+                setFireLocation("");
+                setTrainingTime("");
+                setTeamSetting("자동설정");
+                setTeamCounts({});
+                setNpcSetting("자동설정");
+                setNpcPosition("");
+                setNpcStatus("");
+              }}
+              disabled={saving}
+              className="px-6 py-3 bg-gray-400 text-white rounded-lg shadow disabled:opacity-60"
+            >
+              새 시나리오 작성
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -80,6 +80,11 @@ export default function SchoolSetting() {
   const [beaconList, setBeaconList] = useState([]);
   const [beaconLoading, setBeaconLoading] = useState(false);
 
+  const [beaconElementMaps, setBeaconElementMaps] = useState([]);
+  const [mappingLoading, setMappingLoading] = useState(false);
+  const [selectedBeaconForMap, setSelectedBeaconForMap] = useState("");
+  const [selectedElementForMap, setSelectedElementForMap] = useState("");
+
   // ====== Viewport ======
   const VIEW_W = 900;
   const VIEW_H = 600;
@@ -493,6 +498,25 @@ export default function SchoolSetting() {
     }
   }, [selectedPlanDetail]);
 
+  const selectedTemplateFloors = useMemo(() => {
+    const floorsJson = selectedTemplateDetail?.floorsJson || null;
+    if (!floorsJson) return [];
+
+    try {
+      const parsed = JSON.parse(floorsJson);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+      console.error(
+        "selectedTemplate floorsJson parse 실패 =",
+        err,
+        floorsJson,
+      );
+      return [];
+    }
+  }, [selectedTemplateDetail]);
+
+  const templatePreviewFloor = selectedTemplateFloors[0] || null;
+
   const previewFloor =
     selectedPlanFloors[planFloorIdx] || selectedPlanFloors[0] || null;
 
@@ -524,15 +548,12 @@ export default function SchoolSetting() {
 
   // 현재 층에서 다음 비콘 번호 계산 (1부터)
   const nextBeaconNo = useMemo(() => {
-    const currentServerBeacons = (beaconList || []).filter(
-      (b) => Number(b.floorIndex) === Number(currentFloorIndex),
-    );
-    const maxNo = currentServerBeacons.reduce(
+    const maxNo = (beaconList || []).reduce(
       (m, b) => Math.max(m, Number(b.beaconNo || 0)),
       0,
     );
     return maxNo + 1;
-  }, [beaconList, currentFloorIndex]);
+  }, [beaconList]);
 
   const fetchBeacons = useCallback(async () => {
     if (!schoolId) {
@@ -668,6 +689,142 @@ export default function SchoolSetting() {
       return true;
     },
     [authHeaders, showAxiosError],
+  );
+
+  const fetchBeaconElementMaps = useCallback(async () => {
+    if (!schoolId) {
+      setBeaconElementMaps([]);
+      return;
+    }
+
+    try {
+      setMappingLoading(true);
+
+      const res = await axios.get(`${API_BASE}/api/beacon-element-maps`, {
+        params: {
+          schoolId,
+          floorIndex: currentFloorIndex,
+        },
+        headers: { ...authHeaders },
+        timeout: 10000,
+        validateStatus: () => true,
+      });
+
+      console.log("비콘-element 매핑 목록 =", res.status, res.data);
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        setBeaconElementMaps([]);
+        showAxiosError("비콘-element 매핑 목록 조회 실패", res);
+        return;
+      }
+
+      setBeaconElementMaps(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error(err);
+      setBeaconElementMaps([]);
+      showAxiosError("비콘-element 매핑 목록 조회 중 오류", err);
+    } finally {
+      setMappingLoading(false);
+    }
+  }, [schoolId, currentFloorIndex, authHeaders, showAxiosError]);
+
+  const createBeaconElementMap = useCallback(async () => {
+    if (!schoolId) {
+      alert("schoolId가 없습니다.");
+      return;
+    }
+
+    if (!selectedBeaconForMap) {
+      alert("비콘을 선택하세요.");
+      return;
+    }
+
+    if (!selectedElementForMap) {
+      alert("구조도 요소를 선택하세요.");
+      return;
+    }
+
+    const payload = {
+      schoolId,
+      floorIndex: currentFloorIndex,
+      beaconId: selectedBeaconForMap,
+      elementId: selectedElementForMap,
+    };
+
+    console.log("비콘-element 매핑 생성 payload =", payload);
+
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/beacon-element-maps`,
+        payload,
+        {
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      console.log("비콘-element 매핑 생성 응답 =", res.status, res.data);
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("비콘-element 매핑 생성 실패", res);
+        return;
+      }
+
+      alert("✅ 비콘과 구조도 요소가 연결되었습니다.");
+
+      setSelectedBeaconForMap("");
+      setSelectedElementForMap("");
+
+      await fetchBeaconElementMaps();
+    } catch (err) {
+      console.error(err);
+      showAxiosError("비콘-element 매핑 생성 중 오류", err);
+    }
+  }, [
+    schoolId,
+    currentFloorIndex,
+    selectedBeaconForMap,
+    selectedElementForMap,
+    authHeaders,
+    showAxiosError,
+    fetchBeaconElementMaps,
+  ]);
+
+  const deleteBeaconElementMap = useCallback(
+    async (mappingId) => {
+      if (!mappingId) {
+        alert("삭제할 mappingId가 없습니다.");
+        return;
+      }
+
+      if (!window.confirm("이 비콘-element 매핑을 삭제할까요?")) return;
+
+      try {
+        const res = await axios.delete(
+          `${API_BASE}/api/beacon-element-maps/${mappingId}`,
+          {
+            headers: { ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("비콘-element 매핑 삭제 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("비콘-element 매핑 삭제 실패", res);
+          return;
+        }
+
+        alert("✅ 매핑이 삭제되었습니다.");
+        await fetchBeaconElementMaps();
+      } catch (err) {
+        console.error(err);
+        showAxiosError("비콘-element 매핑 삭제 중 오류", err);
+      }
+    },
+    [authHeaders, showAxiosError, fetchBeaconElementMaps],
   );
 
   const confirmAddBeacon = useCallback(async () => {
@@ -891,6 +1048,12 @@ export default function SchoolSetting() {
     if (!classroomId) return;
     fetchActiveMap();
   }, [classroomId, fetchActiveMap]);
+
+  useEffect(() => {
+    if (!schoolId) return;
+
+    fetchBeaconElementMaps();
+  }, [schoolId, currentFloorIndex, fetchBeaconElementMaps]);
 
   const fetchSchoolMaps = useCallback(async () => {
     if (!schoolId) return;
@@ -4552,132 +4715,169 @@ export default function SchoolSetting() {
         </div>
       )}
       {isTemplateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-3xl rounded-2xl bg-white shadow-xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-2xl font-bold text-[#2E7D32]">템플릿 관리</h3>
+        <div className="fixed inset-0 z-[9999] bg-black/40 flex items-center justify-center">
+          <div className="bg-white rounded-xl shadow-xl w-[1100px] max-h-[85vh] overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h2 className="text-xl font-bold text-[#2E7D32]">템플릿 관리</h2>
+
               <button
-                type="button"
-                onClick={() => {
-                  setIsTemplateModalOpen(false);
-                  setSelectedTemplateId(null);
-                  setSelectedTemplateDetail(null);
-                }}
-                className="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                onClick={() => setIsTemplateModalOpen(false)}
+                className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300"
               >
                 닫기
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-[360px_1fr] gap-0">
               {/* 왼쪽: 템플릿 목록 */}
-              <div className="border rounded-xl p-4 bg-gray-50">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-lg font-semibold">템플릿 목록</h4>
-                  <button
-                    type="button"
-                    onClick={fetchMapTemplates}
-                    className="px-3 py-2 rounded-lg border border-green-600 text-green-700 hover:bg-green-50"
-                  >
-                    새로고침
-                  </button>
-                </div>
+              <div className="border-r p-4 max-h-[72vh] overflow-auto">
+                <h3 className="font-bold mb-3">템플릿 목록</h3>
 
-                {templates.length === 0 ? (
+                {templates.length === 0 && (
                   <p className="text-sm text-gray-500">
                     저장된 템플릿이 없습니다.
                   </p>
-                ) : (
-                  <div className="space-y-2 max-h-[420px] overflow-y-auto">
-                    {templates.map((tpl) => {
-                      const templateId =
-                        tpl.templateId || tpl.id || tpl.mapTemplateId || "";
-
-                      const templateTitle =
-                        tpl.templateName || tpl.name || "이름 없는 템플릿";
-
-                      return (
-                        <div
-                          key={templateId}
-                          className={`rounded-xl border p-3 ${
-                            selectedTemplateId === templateId
-                              ? "border-green-600 bg-green-50"
-                              : "border-gray-200 bg-white"
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedTemplateId(templateId)}
-                              className="flex-1 text-left"
-                            >
-                              <div className="font-semibold text-gray-900">
-                                {templateTitle}
-                              </div>
-                              <div className="text-sm text-gray-500 mt-1">
-                                {tpl.description || "설명 없음"}
-                              </div>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteTemplate(templateId)}
-                              className="shrink-0 px-3 py-2 rounded-lg border border-red-500 text-red-600 hover:bg-red-50"
-                            >
-                              삭제
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
                 )}
+
+                <div className="space-y-2">
+                  {templates.map((tpl) => {
+                    const templateId = tpl.templateId || tpl.id;
+                    const isSelected = selectedTemplateId === templateId;
+
+                    return (
+                      <button
+                        key={templateId}
+                        onClick={() => {
+                          setSelectedTemplateId(templateId);
+                          setSelectedTemplateDetail(null);
+                        }}
+                        className={`w-full text-left border rounded-lg px-3 py-2 ${
+                          isSelected
+                            ? "bg-[#E8F5E9] border-[#2E7D32]"
+                            : "bg-white hover:bg-gray-50"
+                        }`}
+                      >
+                        <div className="font-semibold">
+                          {tpl.templateName || tpl.name || "이름 없는 템플릿"}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              {/* 오른쪽: 선택 템플릿 상세 */}
-              <div className="border rounded-xl p-4 bg-white">
-                <h4 className="text-lg font-semibold mb-3">템플릿 상세</h4>
-
-                {!selectedTemplateDetail ? (
-                  <p className="text-sm text-gray-500">
+              {/* 오른쪽: 템플릿 미리보기 + 수정 */}
+              <div className="p-4 max-h-[72vh] overflow-auto">
+                {!selectedTemplateDetail && (
+                  <div className="h-[500px] flex items-center justify-center text-gray-500 border rounded-lg">
                     왼쪽에서 템플릿을 선택하세요.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-sm text-gray-600 mb-1">
-                        템플릿 이름
-                      </label>
-                      <input
-                        type="text"
-                        value={templateName}
-                        onChange={(e) => setTemplateName(e.target.value)}
-                        className="w-full border rounded-lg px-3 py-2"
-                        placeholder="템플릿 이름"
-                      />
-                    </div>
+                  </div>
+                )}
 
-                    <div>
-                      <label className="block text-sm text-gray-600 mb-1">
-                        설명
-                      </label>
-                      <textarea
-                        value={templateDescription}
-                        onChange={(e) => setTemplateDescription(e.target.value)}
-                        className="w-full border rounded-lg px-3 py-2 min-h-[120px]"
-                        placeholder="템플릿 설명"
-                      />
-                    </div>
+                {selectedTemplateDetail && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block mb-1 text-sm font-semibold">
+                          템플릿 이름
+                        </label>
+                        <input
+                          value={templateName}
+                          onChange={(e) => setTemplateName(e.target.value)}
+                          className="border px-3 py-2 rounded w-full"
+                        />
+                      </div>
 
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (!selectedTemplateId) {
-                            alert("수정할 템플릿을 먼저 선택하세요.");
-                            return;
+                      <div>
+                        <label className="block mb-1 text-sm font-semibold">
+                          설명
+                        </label>
+                        <input
+                          value={templateDescription}
+                          onChange={(e) =>
+                            setTemplateDescription(e.target.value)
                           }
+                          className="border px-3 py-2 rounded w-full"
+                        />
+                      </div>
+                    </div>
 
+                    <div className="border rounded-lg p-3">
+                      <h3 className="font-bold mb-2">미리보기</h3>
+
+                      {!templatePreviewFloor && (
+                        <div className="h-[420px] flex items-center justify-center text-gray-500 bg-gray-50 rounded">
+                          미리보기 데이터가 없습니다.
+                        </div>
+                      )}
+
+                      {templatePreviewFloor && (
+                        <div className="w-full overflow-auto rounded-xl border bg-white">
+                          <svg
+                            width="100%"
+                            viewBox={`0 0 ${
+                              templatePreviewFloor?.image?.natural?.w || 1000
+                            } ${templatePreviewFloor?.image?.natural?.h || 700}`}
+                            style={{ display: "block", background: "#fff" }}
+                          >
+                            {toPublicImg(templatePreviewFloor?.image?.src) && (
+                              <image
+                                href={toPublicImg(
+                                  templatePreviewFloor.image.src,
+                                )}
+                                x="0"
+                                y="0"
+                                width={
+                                  templatePreviewFloor?.image?.natural?.w ||
+                                  1000
+                                }
+                                height={
+                                  templatePreviewFloor?.image?.natural?.h || 700
+                                }
+                                preserveAspectRatio="xMidYMid meet"
+                              />
+                            )}
+
+                            {(templatePreviewFloor?.elements || []).map(
+                              (el) => {
+                                if (el.type === "건물윤곽") return null;
+
+                                const x = Number(el.x || 0);
+                                const y = Number(el.y || 0);
+                                const w = Number(el.width || 20);
+                                const h = Number(el.height || 20);
+
+                                return (
+                                  <g key={el.id}>
+                                    <rect
+                                      x={x}
+                                      y={y}
+                                      width={w}
+                                      height={h}
+                                      fill="rgba(76, 175, 80, 0.18)"
+                                      stroke="#4D7F3A"
+                                      strokeWidth="2"
+                                    />
+                                    <text
+                                      x={x + 4}
+                                      y={y + 18}
+                                      fontSize="16"
+                                      fill="#2E7D32"
+                                      fontWeight="700"
+                                    >
+                                      {el.name || el.type}
+                                    </text>
+                                  </g>
+                                );
+                              },
+                            )}
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex justify-end gap-3 mt-6">
+                      <button
+                        onClick={async () => {
                           const updated = await updateMapTemplateMeta(
                             selectedTemplateId,
                             {
@@ -4694,17 +4894,17 @@ export default function SchoolSetting() {
                           setSelectedTemplateDetail(detail);
                           alert("✅ 템플릿이 수정되었습니다.");
                         }}
-                        className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700"
+                        className="px-6 py-3 rounded-lg bg-[#2E7D32] text-white font-bold"
                       >
                         수정 저장
                       </button>
-                    </div>
 
-                    <div className="text-xs text-gray-500 pt-2 border-t">
-                      선택된 템플릿 ID:{" "}
-                      {selectedTemplateDetail.templateId ||
-                        selectedTemplateDetail.id ||
-                        selectedTemplateId}
+                      <button
+                        onClick={() => handleDeleteTemplate(selectedTemplateId)}
+                        className="px-6 py-3 rounded-lg bg-red-500 text-white font-bold"
+                      >
+                        삭제
+                      </button>
                     </div>
                   </div>
                 )}

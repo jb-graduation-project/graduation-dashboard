@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 
@@ -14,9 +14,16 @@ function Navbar() {
       location.state?.classroomId ||
       location.state?.roomId ||
       location.state?.classroomID ||
+      localStorage.getItem("classroomId") ||
       null
     );
   }, [location.state]);
+
+  useEffect(() => {
+    if (classroomId) {
+      localStorage.setItem("classroomId", classroomId);
+    }
+  }, [classroomId]);
 
   // ✅ 로그인 저장값에서 userId 꺼내기 (삭제 API의 query로 필요)
   const userId = useMemo(() => {
@@ -73,6 +80,9 @@ function Navbar() {
         validateStatus: () => true,
       });
 
+      console.log("방 삭제 응답 status =", res.status);
+      console.log("방 삭제 응답 data =", res.data);
+
       if (!(res.status >= 200 && res.status < 300)) {
         alert(
           `방 삭제 실패 (${res.status})\n\n` +
@@ -84,7 +94,8 @@ function Navbar() {
       }
 
       alert("✅ 방이 삭제되었습니다.");
-      navigate("/room-list", { state: { ...location.state } });
+      localStorage.removeItem("classroomId");
+      navigate("/room-list");
     } catch (e) {
       console.error(e);
       alert("서버 오류로 방 삭제에 실패했습니다.");
