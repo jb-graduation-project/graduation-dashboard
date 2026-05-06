@@ -206,7 +206,7 @@ function SchoolChannel() {
         setStudentCount(data.studentCount);
       }
 
-      alert("✅ 입장 코드가 재발급되었습니다.");
+      alert("입장 코드가 재발급되었습니다.");
     } catch (err) {
       showError("입장 코드 재발급 중 오류", err);
     } finally {
@@ -258,7 +258,7 @@ function SchoolChannel() {
       if (data.joinCode) setJoinCode(data.joinCode);
 
       setEditOpen(false);
-      alert("✅ 방 정보가 수정되었습니다.");
+      alert("방 정보가 수정되었습니다.");
     } catch (err) {
       showError("방 정보 수정 중 오류", err);
     } finally {
@@ -297,7 +297,7 @@ function SchoolChannel() {
       }
 
       const data = res.data || {};
-      alert(data.message || "✅ 학생이 강퇴되었습니다.");
+      alert(data.message || "학생이 강퇴되었습니다.");
 
       setStudents((prev) => {
         const next = prev.filter((s) => s.studentId !== studentId);
@@ -357,6 +357,26 @@ function SchoolChannel() {
     const activeMapVersionId = context.activeMapVersionId;
 
     if (!scenarioId) {
+      const assignmentRes = await axios.get(
+        `${API_BASE}/api/scenario-assignments?scenarioId=${scenarioId}`,
+        {
+          headers: { ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (assignmentRes.status >= 200 && assignmentRes.status < 300) {
+        const assignments = Array.isArray(assignmentRes.data)
+          ? assignmentRes.data
+          : [];
+
+        if (assignments.length === 0) {
+          errors.push(
+            "선택된 시나리오에 미션/역할 데이터가 없습니다. 시나리오 저장 또는 자동 미션 생성이 필요합니다.",
+          );
+        }
+      }
       errors.push(
         "시작할 시나리오가 선택되지 않았습니다. 시나리오 관리에서 시나리오를 먼저 선택하세요.",
       );
@@ -477,7 +497,7 @@ function SchoolChannel() {
       };
 
       saveGameContext(nextContext);
-      alert("✅ 훈련이 종료되었습니다.");
+      alert("훈련이 종료되었습니다.");
     } catch (err) {
       showError("훈련 종료 상태 저장 중 오류", err);
     } finally {
@@ -509,7 +529,7 @@ function SchoolChannel() {
 
       if (!validation.ok) {
         alert(
-          "❌ 훈련을 시작할 수 없습니다.\n\n" +
+          "훈련을 시작할 수 없습니다.\n\n" +
             validation.errors.map((e, i) => `${i + 1}. ${e}`).join("\n"),
         );
         return;
@@ -521,7 +541,7 @@ function SchoolChannel() {
       const context = await fetchGameStartContext();
       if (!context) return;
 
-      alert("게임 시작 데이터 로딩 완료!");
+      alert("게임 시작!");
       // navigate("/game", { state: context });
     } catch (err) {
       showError("게임 시작 실패", err);

@@ -29,9 +29,19 @@ function Navbar() {
   const userId = useMemo(() => {
     try {
       const user = JSON.parse(localStorage.getItem("user") || "null");
-      return user?.userId || user?.id || null;
+
+      return (
+        user?.userId ||
+        user?.id ||
+        user?.teacherId ||
+        user?.user_id ||
+        user?.data?.userId ||
+        user?.data?.id ||
+        localStorage.getItem("userId") ||
+        null
+      );
     } catch {
-      return null;
+      return localStorage.getItem("userId") || null;
     }
   }, []);
 

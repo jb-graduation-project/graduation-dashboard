@@ -56,6 +56,7 @@ function ScenarioManagement() {
 
   // 선택된 시나리오(수정 대상)
   const [selectedScenarioId, setSelectedScenarioId] = useState(null);
+  const [activeScenarioId, setActiveScenarioId] = useState(null);
   const [scenarioName, setScenarioName] = useState("");
 
   // 재난 선택
@@ -243,6 +244,26 @@ function ScenarioManagement() {
         ? res.data.map(normalizeScenario)
         : [];
       setScenarioList(list);
+
+      // ✅ 현재 활성 시나리오 조회
+      const ctxRes = await axios.get(
+        `${API_BASE}/api/rooms/${classroomId}/game-start-context`,
+        {
+          headers: { ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      if (ctxRes.status >= 200 && ctxRes.status < 300) {
+        const activeId =
+          ctxRes.data?.scenarioId ||
+          ctxRes.data?.activeScenarioId ||
+          ctxRes.data?.active_scenario_id ||
+          null;
+
+        setActiveScenarioId(activeId);
+      }
     } catch (err) {
       console.error(err);
       setScenarioList([]);
@@ -561,10 +582,14 @@ function ScenarioManagement() {
   };
 
   // ✅ 선택 시 폼에 채우기
-  const handlePickScenario = (rawScenario) => {
+  const handlePickScenario = async (rawScenario) => {
     const s = normalizeScenario(rawScenario);
 
+    const ok = await activateScenario(s.id);
+    if (!ok) return;
+
     setSelectedScenarioId(s.id);
+    setActiveScenarioId(s.id);
     setScenarioName(s.scenarioName || "");
 
     setDisasterType(s.scenarioType === "FIRE" ? "화재" : "지진");
@@ -575,6 +600,7 @@ function ScenarioManagement() {
 
     setFireLocation(s.location || "");
     setTrainingTime(s.trainTime ? String(s.trainTime) : "");
+
     const prev = JSON.parse(localStorage.getItem("gameContext") || "{}");
     localStorage.setItem(
       "gameContext",
@@ -587,7 +613,7 @@ function ScenarioManagement() {
       }),
     );
 
-    alert("✅ 시작할 시나리오로 선택되었습니다.");
+    alert("✅ 시작할 시나리오로 활성화되었습니다.");
 
     try {
       const ta = s.teamAssignmentJson ? JSON.parse(s.teamAssignmentJson) : {};
@@ -604,6 +630,23 @@ function ScenarioManagement() {
       setNpcPosition("");
       setNpcStatus("");
     }
+  };
+
+  const activateScenario = async (scenarioId) => {
+    if (!classroomId || !scenarioId) return false;
+
+    const res = await axios.put(
+      `${API_BASE}/api/rooms/${classroomId}/active-scenario`,
+      { scenarioId },
+      axiosConfig,
+    );
+
+    if (!(res.status >= 200 && res.status < 300)) {
+      showAxiosError("활성 시나리오 설정 실패", res);
+      return false;
+    }
+
+    return true;
   };
 
   useEffect(() => {
@@ -669,8 +712,14 @@ function ScenarioManagement() {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <div className="font-bold">
+                    <div className="font-bold flex items-center gap-2">
                       {s.scenarioName || "(이름 없음)"}
+
+                      {s.id === activeScenarioId && (
+                        <span className="px-3 py-1 text-xs font-bold text-white bg-[#5D8A43] rounded-full">
+                          활성 시나리오
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-gray-500">
                       {s.createdTime

@@ -470,6 +470,13 @@ export default function SchoolSetting() {
     selectedIdsRef.current = selectedIds;
   }, [selectedIds]);
 
+  // ✅ 복사 / 잘라내기 / 붙여넣기용
+  const [clipboard, setClipboard] = useState(null);
+  const clipboardRef = useRef(clipboard);
+  useEffect(() => {
+    clipboardRef.current = clipboard;
+  }, [clipboard]);
+
   const [showHelp, setShowHelp] = useState(false);
 
   // 저장 모달
@@ -2825,11 +2832,71 @@ export default function SchoolSetting() {
         return;
       }
 
+      const idsNow = selectedIdsRef.current;
+      const selectedElements = elements.filter((p) => idsNow.includes(p.id));
+
+      // ✅ Ctrl+X: 잘라내기
+      if (e.key === "x" || e.key === "X") {
+        if (!selectedElements.length) return;
+
+        e.preventDefault();
+        pushUndoSnapshot();
+
+        setElements((prev) => prev.filter((p) => !idsNow.includes(p.id)));
+        setClipboard(JSON.parse(JSON.stringify(selectedElements)));
+
+        setSelectedId(null);
+        setSelectedIds([]);
+        setEditingResizeId(null);
+        return;
+      }
+
+      // ✅ Ctrl+C: 복사
+      if (e.key === "c" || e.key === "C") {
+        if (!selectedElements.length) return;
+
+        e.preventDefault();
+        setClipboard(JSON.parse(JSON.stringify(selectedElements)));
+        return;
+      }
+
+      // ✅ Ctrl+V: 붙여넣기
+      if (e.key === "v" || e.key === "V") {
+        const data = clipboardRef.current;
+        if (!data || !Array.isArray(data) || !data.length) return;
+
+        e.preventDefault();
+        pushUndoSnapshot();
+
+        const now = Date.now();
+
+        const copies = data.map((el, idx) => ({
+          ...el,
+          id: `${el.type || "copy"}-${now}-${idx}-${Math.random()
+            .toString(36)
+            .slice(2, 6)}`,
+          floor: currentFloorIndex,
+          x: typeof el.x === "number" ? el.x + 5 : el.x,
+          y: typeof el.y === "number" ? el.y + 5 : el.y,
+          // ✅ 비콘은 서버 ID 복사하면 안 됨
+          serverBeaconId: el.type === "비콘" ? undefined : el.serverBeaconId,
+        }));
+
+        setElements((prev) => [...prev, ...copies]);
+
+        const newIds = copies.map((c) => c.id);
+        setSelectedIds(newIds);
+        setSelectedId(newIds[newIds.length - 1]);
+        setEditingResizeId(null);
+        return;
+      }
+
       if (e.key === "0") {
         e.preventDefault();
         if (!imageSrc || !imageLoaded) return;
         setZoom(1);
         setImgOffset({ x: 0, y: 0 });
+        return;
       }
       if (e.key === "=" || e.key === "+") {
         e.preventDefault();
@@ -3458,6 +3525,84 @@ export default function SchoolSetting() {
             setEditingResizeId(null);
           },
         });
+      }
+
+      // ✅ 제한 구역: 리사이즈
+      if (hit.el.type === "제한 구역") {
+        opts.push({
+          label: "형태 수정(리사이즈)",
+          action: () => {
+            setMode(null);
+            setEditingResizeId(hit.el.id);
+            setContextMenu(null);
+          },
+        });
+      }
+
+      // ✅ 방 / 재난 구역 / 안전 구역: 타입 변경 + 이름 수정 + 리사이즈
+      if (["방", "재난 구역", "안전 구역"].includes(hit.el.type)) {
+        opts.push(
+          {
+            label: "방(파란색)으로 변경",
+            action: () => {
+              pushUndoSnapshot();
+              setElements((prev) =>
+                prev.map((p) =>
+                  p.id === hit.el.id ? { ...p, type: "방" } : p,
+                ),
+              );
+              setContextMenu(null);
+            },
+          },
+          {
+            label: "재난 구역(빨간색)으로 변경",
+            action: () => {
+              pushUndoSnapshot();
+              setElements((prev) =>
+                prev.map((p) =>
+                  p.id === hit.el.id ? { ...p, type: "재난 구역" } : p,
+                ),
+              );
+              setContextMenu(null);
+            },
+          },
+          {
+            label: "안전 구역(초록색)으로 변경",
+            action: () => {
+              pushUndoSnapshot();
+              setElements((prev) =>
+                prev.map((p) =>
+                  p.id === hit.el.id ? { ...p, type: "안전 구역" } : p,
+                ),
+              );
+              setContextMenu(null);
+            },
+          },
+          {
+            label: "방 이름 수정",
+            action: () => {
+              const curr = hit.el.name || "";
+              const name = window.prompt("새 방 이름을 입력하세요", curr);
+
+              if (name !== null) {
+                pushUndoSnapshot();
+                setElements((prev) =>
+                  prev.map((p) => (p.id === hit.el.id ? { ...p, name } : p)),
+                );
+              }
+
+              setContextMenu(null);
+            },
+          },
+          {
+            label: "형태 수정(리사이즈)",
+            action: () => {
+              setMode(null);
+              setEditingResizeId(hit.el.id);
+              setContextMenu(null);
+            },
+          },
+        );
       }
 
       if (hit.el.type === "문") {
