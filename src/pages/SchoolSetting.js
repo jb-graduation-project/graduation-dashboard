@@ -69,6 +69,7 @@ export default function SchoolSetting() {
   const [mapVersions, setMapVersions] = useState([]);
   const [activeMapVersionId, setActiveMapVersionId] = useState(null);
   const [mapLoading, setMapLoading] = useState(false);
+  const [templateFloorIdx, setTemplateFloorIdx] = useState(0);
 
   const [templates, setTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState(null);
@@ -521,8 +522,6 @@ export default function SchoolSetting() {
       return [];
     }
   }, [selectedTemplateDetail]);
-
-  const templatePreviewFloor = selectedTemplateFloors[0] || null;
 
   const previewFloor =
     selectedPlanFloors[planFloorIdx] || selectedPlanFloors[0] || null;
@@ -4949,76 +4948,72 @@ export default function SchoolSetting() {
 
                     <div className="border rounded-lg p-3">
                       <h3 className="font-bold mb-2">미리보기</h3>
+                      <div style={{ marginBottom: 10 }}></div>
+                      {selectedTemplateFloors.map((floor, idx) => (
+                        <div
+                          key={idx}
+                          className="w-full overflow-auto rounded-xl border bg-white mb-6"
+                        >
+                          <div className="p-3 font-bold text-lg">
+                            {floor.name || `${idx + 1}층`}
+                          </div>
 
-                      {!templatePreviewFloor && (
-                        <div className="h-[420px] flex items-center justify-center text-gray-500 bg-gray-50 rounded">
-                          미리보기 데이터가 없습니다.
-                        </div>
-                      )}
-
-                      {templatePreviewFloor && (
-                        <div className="w-full overflow-auto rounded-xl border bg-white">
                           <svg
                             width="100%"
                             viewBox={`0 0 ${
-                              templatePreviewFloor?.image?.natural?.w || 1000
-                            } ${templatePreviewFloor?.image?.natural?.h || 700}`}
-                            style={{ display: "block", background: "#fff" }}
+                              floor?.image?.natural?.w || 1000
+                            } ${floor?.image?.natural?.h || 700}`}
+                            style={{
+                              display: "block",
+                              background: "#fff",
+                            }}
                           >
-                            {toPublicImg(templatePreviewFloor?.image?.src) && (
+                            {toPublicImg(floor?.image?.src) && (
                               <image
-                                href={toPublicImg(
-                                  templatePreviewFloor.image.src,
-                                )}
+                                href={toPublicImg(floor.image.src)}
                                 x="0"
                                 y="0"
-                                width={
-                                  templatePreviewFloor?.image?.natural?.w ||
-                                  1000
-                                }
-                                height={
-                                  templatePreviewFloor?.image?.natural?.h || 700
-                                }
+                                width={floor?.image?.natural?.w || 1000}
+                                height={floor?.image?.natural?.h || 700}
                                 preserveAspectRatio="xMidYMid meet"
                               />
                             )}
 
-                            {(templatePreviewFloor?.elements || []).map(
-                              (el) => {
-                                if (el.type === "건물윤곽") return null;
+                            {(floor?.elements || []).map((el) => {
+                              if (el.type === "건물윤곽") return null;
 
-                                const x = Number(el.x || 0);
-                                const y = Number(el.y || 0);
-                                const w = Number(el.width || 20);
-                                const h = Number(el.height || 20);
+                              const x = Number(el.x || 0);
+                              const y = Number(el.y || 0);
+                              const w = Number(el.width || 20);
+                              const h = Number(el.height || 20);
 
-                                return (
-                                  <g key={el.id}>
-                                    <rect
-                                      x={x}
-                                      y={y}
-                                      width={w}
-                                      height={h}
-                                      fill="rgba(76, 175, 80, 0.18)"
-                                      stroke="#4D7F3A"
-                                      strokeWidth="2"
-                                    />
-                                    <text
-                                      x={x + 4}
-                                      y={y + 18}
-                                      fontSize="16"
-                                      fill="#2E7D32"
-                                      fontWeight="700"
-                                    >
-                                      {el.name || el.type}
-                                    </text>
-                                  </g>
-                                );
-                              },
-                            )}
+                              return (
+                                <g key={el.id}>
+                                  <rect
+                                    x={x}
+                                    y={y}
+                                    width={w}
+                                    height={h}
+                                    fill="rgba(76, 175, 80, 0.18)"
+                                    stroke="#4D7F3A"
+                                    strokeWidth="2"
+                                  />
+
+                                  <text
+                                    x={x + 4}
+                                    y={y + 18}
+                                    fontSize="16"
+                                    fill="#2E7D32"
+                                    fontWeight="700"
+                                  >
+                                    {el.name || el.type}
+                                  </text>
+                                </g>
+                              );
+                            })}
                           </svg>
                         </div>
-                      )}
+                      ))}
                     </div>
                     <div className="flex justify-end gap-3 mt-6">
                       <button
