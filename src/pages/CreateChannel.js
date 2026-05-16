@@ -8,6 +8,7 @@ const API_BASE = "https://disasterar.onenyang.shop";
 function CreateChannel() {
   const [schoolName, setSchoolName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [schoolNameError, setSchoolNameError] = useState("");
 
   // ✅ 층별 업로드: floorName + file + previewUrl
   const [floors, setFloors] = useState([
@@ -139,7 +140,7 @@ function CreateChannel() {
           msg.includes("duplicate") ||
           msg.includes("중복")
         ) {
-          alert("이미 존재하는 학교 이름입니다. 다른 이름을 입력해주세요.");
+          setSchoolNameError("이미 존재하는 학교 이름입니다.");
           return;
         }
 
@@ -190,9 +191,16 @@ function CreateChannel() {
           type="text"
           placeholder="학교 이름"
           value={schoolName}
-          onChange={(e) => setSchoolName(e.target.value)}
-          className="w-full mb-4 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300"
+          onChange={(e) => {
+            setSchoolName(e.target.value);
+            setSchoolNameError("");
+          }}
+          className="w-full mb-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300"
         />
+
+        {schoolNameError && (
+          <p className="text-red-500 text-sm mb-3 ml-1">{schoolNameError}</p>
+        )}
 
         {/* ✅ 층별 업로드 영역 */}
         <div className="mb-4">

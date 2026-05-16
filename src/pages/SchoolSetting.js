@@ -952,13 +952,19 @@ export default function SchoolSetting() {
       txPower: created.txPower || 0,
     };
 
-    setElements((prev) => [...prev, newBeacon]);
+    const nextElements = [...elements, newBeacon];
+
+    setElements(nextElements);
+
     setSelectedId(id);
     setSelectedIds([id]);
+
     const mapId = floors[floorIdx]?.mapId;
+
     if (mapId) {
-      await updateMapToServer(mapId, floorIdx);
+      await updateMapToServer(mapId, floorIdx, nextElements);
     }
+
     await fetchBeacons();
 
     setIsBeaconModalOpen(false);
@@ -1050,10 +1056,12 @@ export default function SchoolSetting() {
     }
   }, [classroomId, authHeaders]);
 
+  /*
   useEffect(() => {
     if (!classroomId) return;
     fetchActiveMap();
   }, [classroomId, fetchActiveMap]);
+  */
 
   useEffect(() => {
     if (!schoolId) return;
@@ -1196,7 +1204,7 @@ export default function SchoolSetting() {
   );
 
   const updateMapToServer = useCallback(
-    async (mapId, floorIdx) => {
+    async (mapId, floorIdx, overrideElements = null) => {
       if (!schoolId || !mapId) {
         alert("schoolId 또는 mapId가 없습니다.");
         return null;
@@ -1208,7 +1216,7 @@ export default function SchoolSetting() {
         return null;
       }
 
-      const rawElements = floor.elements || [];
+      const rawElements = overrideElements || floor.elements || [];
 
       const normalizedElements = rawElements.map((el) => {
         // 건물 윤곽은 points/rawPoints 중심으로 저장
