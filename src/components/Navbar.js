@@ -58,6 +58,7 @@ function Navbar() {
     { path: "/scenario", label: "시나리오 관리" },
     { path: "/monitoring", label: "실시간 모니터링" },
     { path: "/analysis", label: "분석 결과" },
+    { path: "/manual", label: "사용 메뉴얼" },
   ];
 
   console.log("🔥 SchoolSetting location.state:", location.state);
@@ -128,7 +129,7 @@ function Navbar() {
   return (
     <nav className="relative w-full h-20 flex items-center px-4 overflow-visible">
       {/* 가운데 정렬될 메뉴들 */}
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex space-x-3">
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-2 whitespace-nowrap">
         {navItems.map((item) => {
           const isActive = location.pathname === item.path;
           return (

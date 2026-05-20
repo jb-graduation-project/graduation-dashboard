@@ -50,6 +50,8 @@ export default function SchoolSetting() {
     );
   }, [location.state]);
 
+  const [showGuideModal, setShowGuideModal] = useState(false);
+
   const userId = useMemo(() => {
     try {
       const user = JSON.parse(localStorage.getItem("user") || "null");
@@ -4073,17 +4075,185 @@ export default function SchoolSetting() {
 
           {/* 도움말 */}
           {showHelp && (
-            <div className="p-4 rounded border bg-[#FAFAFA] text-sm text-gray-800 space-y-2">
-              <div className="font-bold text-[#2E7D32]">사용 방법(핵심)</div>
-              <ul className="list-disc pl-5 space-y-1">
-                <li>
-                  선택 모드(도구 선택 안함): 클릭=선택, Ctrl+클릭=다중 선택
-                </li>
-                <li>빈 공간 드래그=박스 선택</li>
-                <li>Space 누른 채 드래그=패닝</li>
-                <li>Ctrl+휠=줌</li>
-                <li>우클릭=삭제/문 회전 등</li>
-              </ul>
+            <div className="mt-4 rounded-2xl border border-gray-200 bg-white/95 shadow-sm overflow-hidden">
+              {/* 헤더 */}
+              <div className="px-6 py-4 border-b bg-green-50">
+                <h2 className="text-2xl font-bold text-green-800">
+                  구조도 설정 가이드
+                </h2>
+
+                <p className="text-sm text-gray-600 mt-1">
+                  구조도 기반 재난 시뮬레이션 공간을 설정합니다.
+                </p>
+              </div>
+
+              <div className="p-6 space-y-8">
+                {/* 설정 순서 */}
+                <section>
+                  <h3 className="text-lg font-bold mb-4 text-gray-800">
+                    🚀 추천 설정 순서
+                  </h3>
+
+                  <div className="flex flex-wrap gap-3">
+                    {[
+                      "자동 분석",
+                      "건물 윤곽",
+                      "방 설정",
+                      "문 설정",
+                      "비콘 등록",
+                      "제한구역",
+                    ].map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="px-4 py-2 rounded-xl bg-green-50 border border-green-200 text-green-800 font-medium text-sm"
+                      >
+                        {idx + 1}. {item}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                {/* 핵심 기능 */}
+                <section>
+                  <h3 className="text-lg font-bold mb-4 text-gray-800">
+                    🛠 주요 기능
+                  </h3>
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {/* 자동 분석 */}
+                    <div className="border rounded-xl p-4 bg-gray-50">
+                      <h4 className="font-bold text-green-700 mb-2">
+                        🤖 자동 분석
+                      </h4>
+
+                      <ul className="space-y-1 text-sm text-gray-700">
+                        <li>• 구조도 업로드 시 자동 실행</li>
+                        <li>• 방과 건물 윤곽 자동 인식</li>
+                        <li>• 잘못된 영역은 직접 수정 가능</li>
+                      </ul>
+                    </div>
+
+                    {/* 방 */}
+                    <div className="border rounded-xl p-4 bg-gray-50">
+                      <h4 className="font-bold text-green-700 mb-2">
+                        🏫 방 설정
+                      </h4>
+
+                      <ul className="space-y-1 text-sm text-gray-700">
+                        <li>• 드래그하여 방 영역 생성</li>
+                        <li>• 방 이름 입력 가능</li>
+                        <li>• 일반 / 재난 / 안전 구역 설정 가능</li>
+                      </ul>
+                    </div>
+
+                    {/* 문 */}
+                    <div className="border rounded-xl p-4 bg-gray-50">
+                      <h4 className="font-bold text-green-700 mb-2">
+                        🚪 문 설정
+                      </h4>
+
+                      <ul className="space-y-1 text-sm text-gray-700">
+                        <li>• 방과 복도 연결 설정</li>
+                        <li>• 클릭 후 방향 지정 가능</li>
+                        <li>• 이동 경로 계산에 사용됨</li>
+                      </ul>
+                    </div>
+
+                    {/* 비콘 */}
+                    <div className="border rounded-xl p-4 bg-gray-50">
+                      <h4 className="font-bold text-green-700 mb-2">
+                        📡 비콘 등록
+                      </h4>
+
+                      <ul className="space-y-1 text-sm text-gray-700">
+                        <li>• 학생 위치 추적 기준 장치</li>
+                        <li>• UUID / Major / Minor 입력</li>
+                        <li>• 모니터링 화면과 연동</li>
+                      </ul>
+                    </div>
+
+                    {/* 제한구역 */}
+                    <div className="border rounded-xl p-4 bg-gray-50">
+                      <h4 className="font-bold text-green-700 mb-2">
+                        ⚠ 제한구역
+                      </h4>
+
+                      <ul className="space-y-1 text-sm text-gray-700">
+                        <li>• 학생 접근 제한 영역 설정</li>
+                        <li>• 위험 지역 표시 가능</li>
+                      </ul>
+                    </div>
+
+                    {/* 건물 윤곽 */}
+                    <div className="border rounded-xl p-4 bg-gray-50">
+                      <h4 className="font-bold text-green-700 mb-2">
+                        🏢 건물 윤곽
+                      </h4>
+
+                      <ul className="space-y-1 text-sm text-gray-700">
+                        <li>• 건물 외곽선을 직접 설정</li>
+                        <li>• 꼭짓점을 순서대로 클릭</li>
+                      </ul>
+                    </div>
+                  </div>
+                </section>
+
+                {/* 층 관리 */}
+                <section>
+                  <h3 className="text-lg font-bold mb-4 text-gray-800">
+                    🏢 층 관리
+                  </h3>
+
+                  <div className="border rounded-xl p-4 bg-gray-50 text-sm text-gray-700 space-y-2">
+                    <p>• 좌우 버튼으로 층 이동 가능</p>
+                    <p>• 층 이름 수정 가능</p>
+                    <p>• 각 층은 별도로 저장 및 관리됨</p>
+                  </div>
+                </section>
+
+                {/* 단축키 */}
+                <section>
+                  <h3 className="text-lg font-bold mb-4 text-gray-800">
+                    ⌨ 단축키
+                  </h3>
+
+                  <div className="grid md:grid-cols-2 gap-3">
+                    {[
+                      ["Ctrl + 클릭", "다중 선택"],
+                      ["Ctrl + Z", "되돌리기"],
+                      ["Ctrl + Y", "다시 실행"],
+                      ["Ctrl + C", "복사"],
+                      ["Ctrl + V", "붙여넣기"],
+                      ["Backspace", "삭제"],
+                      ["ESC", "작업 취소"],
+                      ["Ctrl + 마우스 휠", "확대 / 축소"],
+                    ].map(([key, desc], idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between border rounded-lg px-4 py-3 bg-gray-50"
+                      >
+                        <span className="font-semibold text-green-700">
+                          {key}
+                        </span>
+
+                        <span className="text-sm text-gray-600">{desc}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                {/* 팁 */}
+                <section className="rounded-xl border border-yellow-300 bg-yellow-50 p-4">
+                  <h3 className="font-bold text-yellow-800 mb-2">📌 설정 팁</h3>
+
+                  <ul className="space-y-1 text-sm text-gray-700">
+                    <li>• 방 크기는 대략적으로 맞아도 충분합니다.</li>
+                    <li>• 자동 분석 결과는 수정 가능합니다.</li>
+                    <li>• 문은 연결 관계 표현이 가장 중요합니다.</li>
+                    <li>• 비콘은 실제 설치 위치와 최대한 맞춰주세요.</li>
+                  </ul>
+                </section>
+              </div>
             </div>
           )}
         </div>
