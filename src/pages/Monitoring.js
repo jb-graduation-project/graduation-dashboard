@@ -319,15 +319,27 @@ export default function Monitoring() {
   // floor
   // =========================
 
-  const floors = monitoringData?.floors || [];
+  const floors = useMemo(() => {
+    const rawFloors = monitoringData?.floors || [];
+
+    return rawFloors.filter((floor, index, self) => {
+      const label = floor.floorLabel || floor.name || `${index + 1}층`;
+
+      return (
+        index ===
+        self.findIndex((f) => {
+          const compareLabel = f.floorLabel || f.name;
+
+          return compareLabel === label;
+        })
+      );
+    });
+  }, [monitoringData]);
 
   const selectedFloor = useMemo(() => {
     if (!floors.length) return null;
 
-    return (
-      floors.find((f) => Number(f.floorIndex) === Number(selectedFloorIndex)) ||
-      floors[0]
-    );
+    return floors[selectedFloorIndex] || floors[0];
   }, [floors, selectedFloorIndex]);
 
   // =========================
@@ -503,17 +515,15 @@ export default function Monitoring() {
         {/* floor tabs */}
 
         <div className="flex flex-wrap gap-2">
-          {floors.map((floor) => {
-            const isActive =
-              Number(floor.floorIndex) === Number(selectedFloor?.floorIndex);
+          {floors.map((floor, index) => {
+            const isActive = index === selectedFloorIndex;
 
             return (
               <button
-                key={floor.floorIndex}
+                key={floor.floorIndex ?? index}
                 type="button"
                 onClick={() => {
-                  setSelectedFloorIndex(floor.floorIndex);
-
+                  setSelectedFloorIndex(index);
                   setSelectedMarker(null);
                 }}
                 className={`rounded-full px-4 py-2 text-sm font-medium border transition ${
@@ -522,7 +532,7 @@ export default function Monitoring() {
                     : "bg-white text-[#2E7D32] border-[#A5D6A7] hover:bg-[#F1F8E9]"
                 }`}
               >
-                {floor.floorLabel || `${floor.floorIndex + 1}층`}
+                {floor.floorLabel || floor.name || `${index + 1}층`}
               </button>
             );
           })}
@@ -699,14 +709,11 @@ export default function Monitoring() {
               <h3 className="text-xl font-bold text-[#2E7D32]">
                 3D 메타버스 모니터링
               </h3>
-
-              <p className="mt-1 text-sm text-gray-500">
-                Unity WebGL 실시간 연동
-              </p>
             </div>
 
             <div className="h-[420px] overflow-hidden rounded-lg border border-gray-200 bg-[#F1F8E9]">
               <iframe
+                key={selectedFloor?.floorIndex}
                 id="unity-monitoring-frame"
                 src={unityUrl}
                 width="100%"
