@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Navbar from "../components/Navbar";
 
-const API_BASE_URL =
-  process.env.REACT_APP_API_BASE_URL || "https://disasterar.onenyang.shop";
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
 export default function Monitoring() {
   // =========================
@@ -106,6 +105,15 @@ export default function Monitoring() {
     }
 
     return `약함 (${rssi} dBm)`;
+  };
+
+  const getMarkerZoneId = (marker) => {
+    return (
+      marker?.zoneElementId ||
+      marker?.elementId ||
+      marker?.beaconElementId ||
+      marker?.beaconId
+    );
   };
 
   // =========================
@@ -235,11 +243,24 @@ export default function Monitoring() {
           return {
             ...floor,
 
+            floorIndex:
+              floor.floorIndex ??
+              mapFloor?.floorIndex ??
+              mapFloor?.floor ??
+              index,
+
             floorLabel:
               floor.floorLabel ||
               mapFloor?.floorLabel ||
               mapFloor?.name ||
               `${index + 1}층`,
+
+            elements:
+              Array.isArray(floor.elements) && floor.elements.length > 0
+                ? floor.elements
+                : Array.isArray(mapFloor?.elements)
+                  ? mapFloor.elements
+                  : [],
 
             image: {
               ...floor.image,
@@ -253,11 +274,13 @@ export default function Monitoring() {
               naturalWidth:
                 floor.image?.naturalWidth ||
                 mapFloor?.image?.natural?.w ||
+                mapFloor?.image?.naturalWidth ||
                 1710,
 
               naturalHeight:
                 floor.image?.naturalHeight ||
                 mapFloor?.image?.natural?.h ||
+                mapFloor?.image?.naturalHeight ||
                 423,
             },
           };
@@ -352,20 +375,132 @@ export default function Monitoring() {
     return resolveImageUrl(src);
   }, [selectedFloor, resolveImageUrl]);
 
+  const imageNaturalSize = useMemo(() => {
+    const image = selectedFloor?.image || {};
+
+    const width =
+      Number(image.naturalWidth) ||
+      Number(image.width) ||
+      Number(image.natural?.w) ||
+      Number(selectedFloor?.naturalWidth) ||
+      1710;
+
+    const height =
+      Number(image.naturalHeight) ||
+      Number(image.height) ||
+      Number(image.natural?.h) ||
+      Number(selectedFloor?.naturalHeight) ||
+      423;
+
+    return {
+      width,
+      height,
+    };
+  }, [selectedFloor]);
+
+  const toPercentX = useCallback(
+    (x) => `${(Number(x || 0) / imageNaturalSize.width) * 100}%`,
+    [imageNaturalSize.width],
+  );
+
+  const toPercentY = useCallback(
+    (y) => `${(Number(y || 0) / imageNaturalSize.height) * 100}%`,
+    [imageNaturalSize.height],
+  );
+
+  const toPercentWidth = useCallback(
+    (width) => `${(Number(width || 0) / imageNaturalSize.width) * 100}%`,
+    [imageNaturalSize.width],
+  );
+
+  const toPercentHeight = useCallback(
+    (height) => `${(Number(height || 0) / imageNaturalSize.height) * 100}%`,
+    [imageNaturalSize.height],
+  );
+
   // =========================
   // marker
   // =========================
 
   const markers = Array.isArray(selectedFloor?.beaconMarkers)
-    ? selectedFloor.beaconMarkers
+    ? selectedFloor.beaconMarkers.filter((marker) => marker.isActive !== false)
     : [];
+
+  // 구조도에 저장된 실제 비콘 설치 위치
+  const beaconElements = (selectedFloor?.elements || []).filter((el) => {
+    const type = String(el.elementType || el.type || "").toUpperCase();
+
+    return type === "BEACON" || el.type === "비콘";
+  });
+
+  const getMarkerPosition = (marker) => {
+    const matchedBeacon = beaconElements.find((el) => {
+      const elementBeaconId = String(el.serverBeaconId || el.beaconId || "");
+
+      const markerBeaconId = String(marker.beaconId || "");
+
+      return (
+        elementBeaconId && markerBeaconId && elementBeaconId === markerBeaconId
+      );
+    });
+
+    // 1순위: SchoolSetting에서 찍은 실제 비콘 좌표
+    if (matchedBeacon) {
+      return {
+        x: matchedBeacon.x,
+        y: matchedBeacon.y,
+      };
+    }
+
+    // 2순위: 백엔드 beaconMarkers 좌표
+    return {
+      x: marker.x,
+      y: marker.y,
+    };
+  };
 
   // =========================
   // zone
   // =========================
 
+  const normalizeZoneType = (type) => {
+    const raw = String(type ?? "").trim();
+    const compact = raw.replace(/\s+/g, "");
+    const upper = raw.toUpperCase();
+
+    if (
+      upper === "FIRE_ZONE" ||
+      upper === "DANGER_ZONE" ||
+      upper === "DISASTER_ZONE" ||
+      compact === "재난구역" ||
+      compact === "화재구역"
+    ) {
+      return "FIRE_ZONE";
+    }
+
+    if (
+      upper === "SAFE_ZONE" ||
+      compact === "안전구역" ||
+      compact === "대피구역"
+    ) {
+      return "SAFE_ZONE";
+    }
+
+    if (
+      upper === "RESTRICTED_ZONE" ||
+      compact === "제한구역" ||
+      compact === "출입제한"
+    ) {
+      return "RESTRICTED_ZONE";
+    }
+
+    return "";
+  };
+
   const zoneElements = (selectedFloor?.elements || []).filter((e) =>
-    ["안전 구역", "재난 구역", "제한 구역"].includes(e.type),
+    ["FIRE_ZONE", "SAFE_ZONE", "RESTRICTED_ZONE"].includes(
+      normalizeZoneType(e.zoneType || e.elementType || e.type),
+    ),
   );
 
   // =========================
@@ -405,6 +540,9 @@ export default function Monitoring() {
   // =========================
 
   const handleSelectMarker = (marker) => {
+    const zoneId = getMarkerZoneId(marker);
+    const position = getMarkerPosition(marker);
+
     setSelectedMarker(marker);
 
     const iframe = document.getElementById("unity-monitoring-frame");
@@ -414,17 +552,24 @@ export default function Monitoring() {
         type: "SELECT_BEACON_ZONE",
 
         payload: {
-          elementId: marker.elementId,
+          elementId: marker.zoneElementId || marker.elementId || zoneId,
+          zoneElementId: marker.zoneElementId || marker.elementId,
+          beaconElementId: marker.beaconElementId || null,
+          beaconId: marker.beaconId,
 
           placementName: marker.placementName,
 
-          x: marker.x,
+          x: position.x,
+          y: position.y,
+          width: marker.width,
+          height: marker.height,
 
-          y: marker.y,
-
-          studentCount: marker.studentCount,
-
+          studentCount: marker.studentCount ?? 0,
           students: marker.students || [],
+
+          thresholdRssi: marker.thresholdRssi,
+
+          zoneType: normalizeZoneType(marker.zoneType),
         },
       },
       "*",
@@ -504,7 +649,7 @@ export default function Monitoring() {
           </div>
 
           <div className="rounded-2xl border border-[#C8E6C9] bg-white p-5 shadow-md">
-            <p className="text-sm text-gray-500">현재 층 비콘 수</p>
+            <p className="text-sm text-gray-500">현재 층 활성 비콘 수</p>
 
             <p className="mt-2 text-4xl font-bold text-[#1976D2]">
               {markers.length}
@@ -554,90 +699,104 @@ export default function Monitoring() {
               </p>
             </div>
 
-            <div
-              className="relative w-full overflow-hidden rounded-lg border border-gray-200 bg-[#F1F8E9]"
-              style={{
-                aspectRatio: "1710 / 423",
-              }}
-            >
-              {imageUrl ? (
-                <img
-                  src={imageUrl}
-                  alt="구조도"
-                  className="absolute inset-0 h-full w-full object-contain select-none"
-                  draggable={false}
-                />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-                  구조도 이미지 없음
-                </div>
-              )}
-
-              {/* zones */}
-
-              {zoneElements.map((element) => {
-                const left = `${(element.x / 1710) * 100}%`;
-
-                const top = `${(element.y / 423) * 100}%`;
-
-                const width = `${((element.width ?? 0) / 1710) * 100}%`;
-
-                const height = `${((element.height ?? 0) / 423) * 100}%`;
-
-                return (
-                  <div
-                    key={element.id}
-                    className={`absolute rounded-lg border-2 ${
-                      element.type === "안전 구역"
-                        ? "border-green-600 bg-green-500/20"
-                        : ""
-                    } ${
-                      element.type === "재난 구역"
-                        ? "border-red-600 bg-red-500/20"
-                        : ""
-                    } ${
-                      element.type === "제한 구역"
-                        ? "border-yellow-500 bg-yellow-400/20"
-                        : ""
-                    }`}
+            <div className="w-full overflow-auto rounded-lg border border-gray-200 bg-[#F1F8E9]">
+              <div
+                className="relative mx-auto"
+                style={{
+                  width: "100%",
+                  maxWidth: "100%",
+                  aspectRatio: `${imageNaturalSize.width} / ${imageNaturalSize.height}`,
+                }}
+              >
+                {imageUrl ? (
+                  <img
+                    src={imageUrl}
+                    alt="구조도"
+                    className="absolute inset-0 h-full w-full select-none"
                     style={{
-                      left,
-                      top,
-                      width,
-                      height,
+                      objectFit: "fill",
                     }}
+                    draggable={false}
                   />
-                );
-              })}
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center text-gray-400">
+                    구조도 이미지 없음
+                  </div>
+                )}
 
-              {/* markers */}
+                {zoneElements.map((element) => {
+                  const zoneType = normalizeZoneType(
+                    element.zoneType || element.elementType || element.type,
+                  );
 
-              {markers.map((marker) => {
-                const left = `${(marker.x / 1710) * 100}%`;
+                  const left = toPercentX(element.x);
+                  const top = toPercentY(element.y);
+                  const width = toPercentWidth(element.width);
+                  const height = toPercentHeight(element.height);
 
-                const top = `${(marker.y / 423) * 100}%`;
+                  return (
+                    <div
+                      key={element.id}
+                      className={`absolute rounded-lg border-2 ${
+                        zoneType === "SAFE_ZONE"
+                          ? "border-green-600 bg-green-500/20"
+                          : ""
+                      } ${
+                        zoneType === "FIRE_ZONE"
+                          ? "border-red-600 bg-red-500/20"
+                          : ""
+                      } ${
+                        zoneType === "RESTRICTED_ZONE"
+                          ? "border-yellow-500 bg-yellow-400/20"
+                          : ""
+                      }`}
+                      style={{
+                        left,
+                        top,
+                        width,
+                        height,
+                      }}
+                      title={`${zoneType} / ${element.name || element.id}`}
+                    />
+                  );
+                })}
 
-                const selected = selectedMarker?.elementId === marker.elementId;
+                {/* markers */}
+                {/* markers */}
+                {markers.map((marker) => {
+                  const position = getMarkerPosition(marker);
 
-                return (
-                  <button
-                    key={marker.elementId}
-                    type="button"
-                    onClick={() => handleSelectMarker(marker)}
-                    className={`absolute flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white text-sm font-bold text-white shadow-lg transition ${
-                      selected
-                        ? "bg-green-600 ring-4 ring-green-200"
-                        : "bg-blue-500 hover:brightness-110"
-                    }`}
-                    style={{
-                      left,
-                      top,
-                    }}
-                  >
-                    {marker.studentCount ?? 0}
-                  </button>
-                );
-              })}
+                  const left = toPercentX(position.x);
+                  const top = toPercentY(position.y);
+
+                  const markerZoneId = getMarkerZoneId(marker);
+                  const selectedMarkerZoneId = getMarkerZoneId(selectedMarker);
+
+                  const selected = selectedMarkerZoneId === markerZoneId;
+
+                  return (
+                    <button
+                      key={markerZoneId}
+                      type="button"
+                      onClick={() => handleSelectMarker(marker)}
+                      className={`absolute flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white text-sm font-bold text-white shadow-lg transition ${
+                        selected
+                          ? "bg-green-600 ring-4 ring-green-200"
+                          : "bg-blue-500 hover:brightness-110"
+                      }`}
+                      style={{
+                        left,
+                        top,
+                      }}
+                      title={`${marker.placementName || "비콘"} / 감지 학생 ${
+                        marker.studentCount ?? 0
+                      }명`}
+                    >
+                      {marker.studentCount ?? 0}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* selected students */}
@@ -654,6 +813,25 @@ export default function Monitoring() {
 
                     <p className="text-sm text-gray-500">
                       {selectedMarker.zoneType}
+                    </p>
+
+                    <p className="text-xs text-gray-500">
+                      구역 ID:{" "}
+                      {selectedMarker.zoneElementId ||
+                        selectedMarker.elementId ||
+                        "-"}
+                    </p>
+
+                    <p className="text-xs text-gray-500">
+                      감지 기준 RSSI:{" "}
+                      {selectedMarker.thresholdRssi !== null &&
+                      selectedMarker.thresholdRssi !== undefined
+                        ? `${selectedMarker.thresholdRssi} dBm`
+                        : "-"}
+                    </p>
+
+                    <p className="text-xs text-gray-500">
+                      현재 감지 학생: {selectedMarker.studentCount ?? 0}명
                     </p>
                   </div>
 
@@ -787,7 +965,10 @@ export default function Monitoring() {
                       </td>
 
                       <td className="border-b px-4 py-3 text-gray-700">
-                        {student.beaconId || "미감지"}
+                        {student.placementName ||
+                          student.zoneName ||
+                          student.beaconId ||
+                          "미감지"}
                       </td>
 
                       <td className="border-b px-4 py-3 text-gray-700">

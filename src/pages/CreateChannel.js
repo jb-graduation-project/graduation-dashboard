@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
-const API_BASE = "https://disasterar.onenyang.shop";
+const API_BASE = process.env.REACT_APP_API_BASE_URL;
 
 function CreateChannel() {
   const [schoolName, setSchoolName] = useState("");

@@ -10,7 +10,7 @@ import Navbar from "../components/Navbar";
 import axios from "axios";
 import { useLocation } from "react-router-dom";
 
-const API_BASE = "https://disasterar.onenyang.shop";
+const API_BASE = process.env.REACT_APP_API_BASE_URL;
 
 export default function SchoolSetting() {
   const location = useLocation();
@@ -212,19 +212,181 @@ export default function SchoolSetting() {
     typeof n === "number" ? Math.round(n * 10000) / 10000 : n;
 
   function typeColor(type, alpha = 0.25) {
-    switch (type) {
-      case "제한 구역":
+    const normalized = normalizeElementType(type);
+
+    switch (normalized) {
+      case "RESTRICTED_ZONE":
         return `rgba(255,165,0,${alpha})`;
-      case "재난 구역":
+
+      case "FIRE_ZONE":
         return `rgba(255,0,0,${alpha})`;
-      case "안전 구역":
+
+      case "SAFE_ZONE":
         return `rgba(0,200,0,${alpha})`;
+
       case "방":
         return `rgba(0,112,255,${alpha})`;
+
       default:
         return `rgba(0,0,0,0)`;
     }
   }
+
+  const getServerFloorIndex = (floor, idx) => {
+    const fromFloor =
+      floor?.floorIndex ??
+      floor?.floor_index ??
+      floor?.floor ??
+      floor?.index ??
+      floor?.floorNo ??
+      floor?.floorNumber ??
+      floor?.serverFloorIndex;
+
+    if (fromFloor !== undefined && fromFloor !== null && fromFloor !== "") {
+      return Number(fromFloor);
+    }
+
+    const fromElement = (floor?.elements || [])
+      .map(
+        (el) =>
+          el?.floorIndex ??
+          el?.floor_index ??
+          el?.floor ??
+          el?.floorNo ??
+          el?.floorNumber,
+      )
+      .find((v) => v !== undefined && v !== null && v !== "");
+
+    if (fromElement !== undefined) {
+      return Number(fromElement);
+    }
+
+    return Number(idx);
+  };
+
+  const normalizeElementType = (type) => {
+    const raw = String(type ?? "").trim();
+    const compact = raw.replace(/\s+/g, "");
+    const upper = raw.toUpperCase();
+
+    if (
+      upper === "FIRE_ZONE" ||
+      upper === "DANGER_ZONE" ||
+      upper === "DISASTER_ZONE" ||
+      compact === "재난구역" ||
+      compact === "화재구역"
+    ) {
+      return "FIRE_ZONE";
+    }
+
+    if (
+      upper === "SAFE_ZONE" ||
+      compact === "안전구역" ||
+      compact === "대피구역"
+    ) {
+      return "SAFE_ZONE";
+    }
+
+    if (
+      upper === "RESTRICTED_ZONE" ||
+      compact === "제한구역" ||
+      compact === "출입제한"
+    ) {
+      return "RESTRICTED_ZONE";
+    }
+
+    if (upper === "BEACON" || compact === "비콘") {
+      return "BEACON";
+    }
+
+    return raw;
+  };
+
+  const isZoneElement = (el) => {
+    const normalized = normalizeElementType(el?.elementType ?? el?.type);
+
+    return ["FIRE_ZONE", "SAFE_ZONE", "RESTRICTED_ZONE"].includes(normalized);
+  };
+
+  const normalizeElementForSave = (el, serverFloorIndex) => {
+    const normalizedType = normalizeElementType(el.elementType ?? el.type);
+
+    if (el.type === "비콘" || normalizedType === "BEACON") {
+      return {
+        id: el.id,
+        type: "비콘",
+        elementType: "BEACON",
+
+        floorIndex: serverFloorIndex,
+        floor: serverFloorIndex,
+
+        x: Number(el.x ?? 0),
+        y: Number(el.y ?? 0),
+        width: Number(el.width ?? 28),
+        height: Number(el.height ?? 28),
+        beaconNo: Number(el.beaconNo ?? 0),
+        name: el.name || "",
+        beaconUuid: el.beaconUuid || el.uuid || "",
+        beaconMajor: el.beaconMajor ?? el.major ?? "",
+        beaconMinor: el.beaconMinor ?? el.minor ?? "",
+        serverBeaconId: el.serverBeaconId || el.beaconId || "",
+      };
+    }
+
+    if (isZoneElement(el)) {
+      return {
+        id: el.id,
+        type: normalizedType,
+        elementType: normalizedType,
+        zoneType: normalizedType,
+
+        floorIndex: serverFloorIndex,
+        floor: serverFloorIndex,
+
+        x: Number(el.x ?? 0),
+        y: Number(el.y ?? 0),
+        width: Number(el.width ?? 0),
+        height: Number(el.height ?? 0),
+        name: el.name || el.placementName || "",
+      };
+    }
+
+    if (el.type === "건물윤곽") {
+      return {
+        id: el.id,
+        type: el.type,
+        elementType: el.elementType || el.type,
+        floor: serverFloorIndex,
+        points: Array.isArray(el.points) ? el.points : [],
+        rawPoints: Array.isArray(el.rawPoints) ? el.rawPoints : [],
+      };
+    }
+
+    if (el.type === "문") {
+      return {
+        id: el.id,
+        type: el.type,
+        elementType: el.elementType || el.type,
+        floor: serverFloorIndex,
+        x: Number(el.x ?? 0),
+        y: Number(el.y ?? 0),
+        angle: Number(el.angle ?? 0),
+      };
+    }
+
+    return {
+      id: el.id,
+      type: el.type,
+      elementType: el.elementType || el.type,
+      floor: serverFloorIndex,
+      x: Number(el.x ?? 0),
+      y: Number(el.y ?? 0),
+      width: Number(el.width ?? 0),
+      height: Number(el.height ?? 0),
+      name: el.name || "",
+    };
+  };
+
   // ====== Floor model ======
   const makeEmptyFloor = useCallback(() => {
     return {
@@ -708,10 +870,15 @@ export default function SchoolSetting() {
     try {
       setMappingLoading(true);
 
+      const serverFloorIndex = getServerFloorIndex(
+        floors[currentFloorIndex],
+        currentFloorIndex,
+      );
+
       const res = await axios.get(`${API_BASE}/api/beacon-element-maps`, {
         params: {
           schoolId,
-          floorIndex: currentFloorIndex,
+          floorIndex: serverFloorIndex,
         },
         headers: { ...authHeaders },
         timeout: 10000,
@@ -736,68 +903,83 @@ export default function SchoolSetting() {
     }
   }, [schoolId, currentFloorIndex, authHeaders, showAxiosError]);
 
-  const createBeaconElementMap = useCallback(async () => {
-    if (!schoolId) {
-      alert("schoolId가 없습니다.");
-      return;
-    }
-
-    if (!selectedBeaconForMap) {
-      alert("비콘을 선택하세요.");
-      return;
-    }
-
-    if (!selectedElementForMap) {
-      alert("구조도 요소를 선택하세요.");
-      return;
-    }
-
-    const payload = {
-      schoolId,
-      floorIndex: currentFloorIndex,
-      beaconId: selectedBeaconForMap,
-      elementId: selectedElementForMap,
-    };
-
-    console.log("비콘-element 매핑 생성 payload =", payload);
-
-    try {
-      const res = await axios.post(
-        `${API_BASE}/api/beacon-element-maps`,
-        payload,
-        {
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          timeout: 10000,
-          validateStatus: () => true,
-        },
-      );
-
-      console.log("비콘-element 매핑 생성 응답 =", res.status, res.data);
-
-      if (!(res.status >= 200 && res.status < 300)) {
-        showAxiosError("비콘-element 매핑 생성 실패", res);
-        return;
+  const syncBeaconMappings = useCallback(
+    async (mapVersionId, label = "") => {
+      if (!classroomId || !mapVersionId) {
+        console.warn("sync 생략: classroomId 또는 mapVersionId 없음");
+        return null;
       }
 
-      alert("✅ 비콘과 구조도 요소가 연결되었습니다.");
+      const payload = {
+        classroomId,
+        activeMapVersionId: mapVersionId,
+        label: label || "active-map-sync",
+      };
 
-      setSelectedBeaconForMap("");
-      setSelectedElementForMap("");
+      try {
+        const res = await axios.post(
+          `${API_BASE}/api/rooms/${classroomId}/beacon-mappings/sync`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
 
-      await fetchBeaconElementMaps();
-    } catch (err) {
-      console.error(err);
-      showAxiosError("비콘-element 매핑 생성 중 오류", err);
-    }
-  }, [
-    schoolId,
-    currentFloorIndex,
-    selectedBeaconForMap,
-    selectedElementForMap,
-    authHeaders,
-    showAxiosError,
-    fetchBeaconElementMaps,
-  ]);
+        console.log("beacon-mappings sync 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("비콘 매핑 동기화 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error("비콘 매핑 동기화 중 오류 =", err);
+        showAxiosError("비콘 매핑 동기화 중 오류", err);
+        return null;
+      }
+    },
+    [classroomId, authHeaders, showAxiosError],
+  );
+
+  const logMonitoringMapAfterSync = useCallback(
+    async (mapVersionId) => {
+      if (!classroomId) return;
+
+      try {
+        const res = await axios.get(
+          `${API_BASE}/api/rooms/${classroomId}/monitoring-map`,
+          {
+            headers: { ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("sync 후 monitoring-map 상태 =", res.status, res.data);
+
+        const floors = res.data?.floors || [];
+        console.log(
+          "sync 후 beaconMarkers 요약 =",
+          floors.map((floor, index) => ({
+            index,
+            floorIndex: floor.floorIndex,
+            floorLabel: floor.floorLabel,
+            beaconMarkersCount: floor.beaconMarkers?.length || 0,
+            beaconMarkers: floor.beaconMarkers || [],
+          })),
+        );
+
+        return res.data || null;
+      } catch (err) {
+        console.error("sync 후 monitoring-map 확인 실패 =", err);
+        return null;
+      }
+    },
+    [classroomId, authHeaders],
+  );
 
   const deleteBeaconElementMap = useCallback(
     async (mappingId) => {
@@ -834,6 +1016,132 @@ export default function SchoolSetting() {
     },
     [authHeaders, showAxiosError, fetchBeaconElementMaps],
   );
+  const findAutoZoneForBeacon = useCallback(
+    (beacon, floorIdx) => {
+      const currentElements = floors[floorIdx]?.elements || [];
+
+      const zoneElements = currentElements.filter((el) => {
+        const normalized = normalizeElementType(
+          el.zoneType || el.elementType || el.type,
+        );
+
+        return ["FIRE_ZONE", "SAFE_ZONE", "RESTRICTED_ZONE"].includes(
+          normalized,
+        );
+      });
+
+      if (!zoneElements.length) return null;
+
+      // 1순위: 비콘 좌표가 구역 내부에 있는 경우
+      const containingZone = zoneElements.find((zone) => {
+        const x = Number(zone.x || 0);
+        const y = Number(zone.y || 0);
+        const width = Number(zone.width || 0);
+        const height = Number(zone.height || 0);
+
+        return (
+          beacon.x >= x &&
+          beacon.x <= x + width &&
+          beacon.y >= y &&
+          beacon.y <= y + height
+        );
+      });
+
+      if (containingZone) return containingZone;
+
+      // 2순위: 가장 가까운 구역
+      const beaconX = Number(beacon.x || 0);
+      const beaconY = Number(beacon.y || 0);
+
+      let nearestZone = null;
+      let nearestDistance = Infinity;
+
+      zoneElements.forEach((zone) => {
+        const centerX = Number(zone.x || 0) + Number(zone.width || 0) / 2;
+        const centerY = Number(zone.y || 0) + Number(zone.height || 0) / 2;
+
+        const distance = Math.hypot(beaconX - centerX, beaconY - centerY);
+
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestZone = zone;
+        }
+      });
+
+      return nearestZone;
+    },
+    [floors],
+  );
+
+  const createBeaconElementMapAuto = useCallback(
+    async ({ beaconId, zoneElementId, floorIndex }) => {
+      if (!schoolId || !beaconId || !zoneElementId) {
+        console.warn("자동 비콘 매핑 생략", {
+          schoolId,
+          beaconId,
+          zoneElementId,
+        });
+        return null;
+      }
+
+      const payload = {
+        schoolId,
+        floorIndex,
+        beaconId,
+        elementId: zoneElementId,
+      };
+
+      console.log("자동 비콘-element 매핑 payload =", payload);
+
+      try {
+        const res = await axios.post(
+          `${API_BASE}/api/beacon-element-maps`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("자동 비콘-element 매핑 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("자동 비콘-element 매핑 생성 실패", res);
+          return null;
+        }
+
+        await fetchBeaconElementMaps();
+
+        const targetMapVersionId =
+          activeMapVersionId || localStorage.getItem("activeMapVersionId");
+
+        if (targetMapVersionId) {
+          await syncBeaconMappings(targetMapVersionId, "auto-beacon-map-sync");
+          await logMonitoringMapAfterSync(targetMapVersionId);
+        } else {
+          console.warn(
+            "activeMapVersionId가 없어서 자동 sync를 실행하지 못했습니다.",
+          );
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error("자동 비콘-element 매핑 중 오류 =", err);
+        showAxiosError("자동 비콘-element 매핑 중 오류", err);
+        return null;
+      }
+    },
+    [
+      schoolId,
+      authHeaders,
+      showAxiosError,
+      fetchBeaconElementMaps,
+      activeMapVersionId,
+      syncBeaconMappings,
+      logMonitoringMapAfterSync,
+    ],
+  );
 
   const confirmAddBeacon = useCallback(async () => {
     console.log("===== 비콘 추가 클릭 =====");
@@ -858,6 +1166,7 @@ export default function SchoolSetting() {
     if (!Number.isInteger(minorNum)) return alert("Minor는 정수로 입력하세요.");
 
     const floorIdx = pendingBeaconNat.floorIdx ?? currentFloorIndex;
+    const serverFloorIndex = getServerFloorIndex(floors[floorIdx], floorIdx);
 
     pushUndoSnapshot();
 
@@ -873,7 +1182,7 @@ export default function SchoolSetting() {
 
       const payload = {
         schoolId,
-        floorIndex: floorIdx,
+        floorIndex: serverFloorIndex,
         uuid,
         major: majorNum,
         minor: minorNum,
@@ -897,9 +1206,11 @@ export default function SchoolSetting() {
           if (el.id !== editingBeaconId) return el;
           return {
             ...el,
+            floor: serverFloorIndex,
             beaconUuid: uuid,
             beaconMajor: majorNum,
             beaconMinor: minorNum,
+            serverBeaconId,
             x: pendingBeaconNat.x,
             y: pendingBeaconNat.y,
             width: el.width || BEACON_SIZE,
@@ -921,7 +1232,7 @@ export default function SchoolSetting() {
 
     // 추가 모드
     const created = await createBeaconOnServer({
-      floorIndex: floorIdx,
+      floorIndex: serverFloorIndex,
       x: pendingBeaconNat.x,
       y: pendingBeaconNat.y,
       uuid,
@@ -936,11 +1247,12 @@ export default function SchoolSetting() {
     const newBeacon = {
       id,
       type: "비콘",
+      elementType: "BEACON",
       x: pendingBeaconNat.x,
       y: pendingBeaconNat.y,
       width: BEACON_SIZE,
       height: BEACON_SIZE,
-      floor: floorIdx,
+      floor: serverFloorIndex,
       beaconUuid: uuid,
       beaconMajor: majorNum,
       beaconMinor: minorNum,
@@ -969,6 +1281,21 @@ export default function SchoolSetting() {
 
     await fetchBeacons();
 
+    // ✅ 비콘 추가 후 자동으로 구역 연결
+    const autoZone = findAutoZoneForBeacon(newBeacon, floorIdx);
+
+    if (autoZone) {
+      await createBeaconElementMapAuto({
+        beaconId: created.beaconId,
+        zoneElementId: autoZone.id,
+        floorIndex: serverFloorIndex,
+      });
+
+      console.log("자동 연결된 구역 =", autoZone);
+    } else {
+      console.warn("자동 연결할 재난/안전/제한 구역을 찾지 못했습니다.");
+    }
+
     setIsBeaconModalOpen(false);
     setPendingBeaconNat(null);
     setEditingBeaconId(null);
@@ -980,6 +1307,7 @@ export default function SchoolSetting() {
     pushUndoSnapshot,
     editingBeaconId,
     elements,
+    floors,
     schoolId,
     BEACON_SIZE,
     updateBeaconOnServer,
@@ -988,6 +1316,8 @@ export default function SchoolSetting() {
     setElements,
     setSelectedId,
     setSelectedIds,
+    findAutoZoneForBeacon,
+    createBeaconElementMapAuto,
   ]);
 
   // 현재 파일의 “층 라벨”
@@ -996,17 +1326,27 @@ export default function SchoolSetting() {
   }, [currentFloorIndex, floorNames]);
 
   const buildFloorsPayload = useCallback(() => {
-    return floors.map((f, idx) => ({
-      name: floorNames[idx] || `${idx + 1}층`,
-      image: {
-        src: f.imageSrc || null,
-        natural: f.imgNatural || { w: 0, h: 0 },
-      },
-      elements: (f.elements || []).map((el) => ({
-        ...el,
-        floor: idx,
-      })),
-    }));
+    return floors.map((f, idx) => {
+      const serverFloorIndex = getServerFloorIndex(f, idx);
+
+      const floorLabel =
+        floorNames[idx] || f.floorLabel || `${serverFloorIndex}층`;
+
+      return {
+        floorIndex: serverFloorIndex,
+        floor: serverFloorIndex,
+        index: serverFloorIndex,
+        floorLabel,
+        name: floorLabel,
+        image: {
+          src: f.imageSrc || null,
+          natural: f.imgNatural || { w: 0, h: 0 },
+        },
+        elements: (f.elements || []).map((el) =>
+          normalizeElementForSave(el, serverFloorIndex),
+        ),
+      };
+    });
   }, [floors, floorNames]);
 
   const fetchActiveMap = useCallback(async () => {
@@ -1034,20 +1374,29 @@ export default function SchoolSetting() {
       setFloorNames(parsedFloors.map((f, idx) => f?.name || `${idx + 1}층`));
 
       setFloors(
-        parsedFloors.map((f, idx) => ({
-          imageSrc: f?.image?.src || null,
-          uploadedFile: null,
-          imgNatural: f?.image?.natural || { w: 0, h: 0 },
-          elements: Array.isArray(f?.elements)
-            ? f.elements.map((el) => ({ ...el, floor: idx }))
-            : [],
-          undoStack: [],
-          redoStack: [],
-          hasAutoAnalysisResult: false,
-          autoElementsCache: [],
-          autoAnalysisHidden: false,
-          abort: { analyze: null },
-        })),
+        parsedFloors.map((f, idx) => {
+          const serverFloorIndex = getServerFloorIndex(f, idx);
+
+          return {
+            floorIndex: serverFloorIndex,
+            floorLabel: f?.floorLabel || f?.name || `${serverFloorIndex}층`,
+            imageSrc: f?.image?.src || null,
+            uploadedFile: null,
+            imgNatural: f?.image?.natural || { w: 0, h: 0 },
+            elements: Array.isArray(f?.elements)
+              ? f.elements.map((el) => ({
+                  ...el,
+                  floor: Number(el.floor ?? serverFloorIndex),
+                }))
+              : [],
+            undoStack: [],
+            redoStack: [],
+            hasAutoAnalysisResult: false,
+            autoElementsCache: [],
+            autoAnalysisHidden: false,
+            abort: { analyze: null },
+          };
+        }),
       );
 
       setCurrentFloorIndex((prev) =>
@@ -1069,7 +1418,7 @@ export default function SchoolSetting() {
     if (!schoolId) return;
 
     fetchBeaconElementMaps();
-  }, [schoolId, currentFloorIndex, fetchBeaconElementMaps]);
+  }, [schoolId, currentFloorIndex, floors, authHeaders, showAxiosError]);
 
   const fetchSchoolMaps = useCallback(async () => {
     if (!schoolId) return;
@@ -1147,13 +1496,20 @@ export default function SchoolSetting() {
           const keepNatural =
             prevFloor?.imageSrc === nextImageSrc ? prevFloor.imgNatural : null;
 
+          const serverFloorIndex = Number(m.floorIndex ?? idx + 1);
+
           return {
             mapId: m.mapId,
+            floorIndex: serverFloorIndex,
+            floorLabel: m.floorLabel || `${serverFloorIndex}층`,
             imageSrc: nextImageSrc,
             uploadedFile: null,
             imgNatural: keepNatural || { w: 0, h: 0 },
             elements: Array.isArray(parsedElements)
-              ? parsedElements.map((el) => ({ ...el, floor: idx }))
+              ? parsedElements.map((el) => ({
+                  ...el,
+                  floor: Number(el.floor ?? serverFloorIndex),
+                }))
               : [],
             undoStack: [],
             redoStack: [],
@@ -1220,65 +1576,20 @@ export default function SchoolSetting() {
 
       const rawElements = overrideElements || floor.elements || [];
 
-      const normalizedElements = rawElements.map((el) => {
-        // 건물 윤곽은 points/rawPoints 중심으로 저장
-        if (el.type === "건물윤곽") {
-          return {
-            id: el.id,
-            type: el.type,
-            floor: el.floor ?? floorIdx,
-            points: Array.isArray(el.points) ? el.points : [],
-            rawPoints: Array.isArray(el.rawPoints) ? el.rawPoints : [],
-          };
-        }
+      const serverFloorIndex = getServerFloorIndex(floor, floorIdx);
 
-        // 비콘은 프론트 전용 필드(serverBeaconId, beaconUuid 등)를 최대한 빼고 저장
-        if (el.type === "비콘") {
-          return {
-            id: el.id,
-            type: el.type,
-            floor: el.floor ?? floorIdx,
-            x: Number(el.x ?? 0),
-            y: Number(el.y ?? 0),
-            width: Number(el.width ?? 28),
-            height: Number(el.height ?? 28),
-            beaconNo: Number(el.beaconNo ?? 0),
-            name: el.name || "",
-          };
-        }
-
-        // 문
-        if (el.type === "문") {
-          return {
-            id: el.id,
-            type: el.type,
-            floor: el.floor ?? floorIdx,
-            x: Number(el.x ?? 0),
-            y: Number(el.y ?? 0),
-            angle: Number(el.angle ?? 0),
-          };
-        }
-
-        // 일반 박스형 요소(방, 제한구역 등)
-        return {
-          id: el.id,
-          type: el.type,
-          floor: el.floor ?? floorIdx,
-          x: Number(el.x ?? 0),
-          y: Number(el.y ?? 0),
-          width: Number(el.width ?? 0),
-          height: Number(el.height ?? 0),
-          name: el.name || "",
-        };
-      });
+      const normalizedElements = rawElements.map((el) =>
+        normalizeElementForSave(el, serverFloorIndex),
+      );
 
       const outlineList = normalizedElements.filter(
         (el) => el.type === "건물윤곽",
       );
 
       const payload = {
-        floorIndex: floorIdx,
-        floorLabel: floorNames[floorIdx] || `${floorIdx + 1}층`,
+        floorIndex: serverFloorIndex,
+        floorLabel:
+          floorNames[floorIdx] || floor.floorLabel || `${serverFloorIndex}층`,
         outlineJson: JSON.stringify(outlineList),
         scaleMPerPx: 0,
         originX: 0,
@@ -2061,6 +2372,90 @@ export default function SchoolSetting() {
   console.log("viewportCenter =", viewportCenterX, viewportCenterY);
   console.log("imgLeft, imgTop =", imgLeft, imgTop);
 
+  const createBeaconElementMap = useCallback(async () => {
+    if (!schoolId) {
+      alert("schoolId가 없습니다.");
+      return;
+    }
+
+    if (!selectedBeaconForMap) {
+      alert("비콘을 선택하세요.");
+      return;
+    }
+
+    if (!selectedElementForMap) {
+      alert("구조도 요소를 선택하세요.");
+      return;
+    }
+
+    const serverFloorIndex = getServerFloorIndex(
+      floors[currentFloorIndex],
+      currentFloorIndex,
+    );
+
+    const payload = {
+      schoolId,
+      floorIndex: serverFloorIndex,
+      beaconId: selectedBeaconForMap,
+      elementId: selectedElementForMap,
+    };
+
+    console.log("비콘-element 매핑 생성 payload =", payload);
+
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/beacon-element-maps`,
+        payload,
+        {
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      console.log("비콘-element 매핑 생성 응답 =", res.status, res.data);
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("비콘-element 매핑 생성 실패", res);
+        return;
+      }
+
+      alert("✅ 비콘과 구조도 요소가 연결되었습니다.");
+
+      setSelectedBeaconForMap("");
+      setSelectedElementForMap("");
+
+      await fetchBeaconElementMaps();
+
+      const targetMapVersionId =
+        activeMapVersionId || localStorage.getItem("activeMapVersionId");
+
+      if (targetMapVersionId) {
+        await syncBeaconMappings(targetMapVersionId, "beacon-map-sync");
+        await logMonitoringMapAfterSync(targetMapVersionId);
+      } else {
+        console.warn(
+          "activeMapVersionId가 없어서 beacon sync를 실행하지 못했습니다.",
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      showAxiosError("비콘-element 매핑 생성 중 오류", err);
+    }
+  }, [
+    schoolId,
+    currentFloorIndex,
+    floors,
+    selectedBeaconForMap,
+    selectedElementForMap,
+    authHeaders,
+    showAxiosError,
+    fetchBeaconElementMaps,
+    activeMapVersionId,
+    syncBeaconMappings,
+    logMonitoringMapAfterSync,
+  ]);
+
   const clampOffsetForScale = useCallback(
     (ox, oy, newScale) => {
       const w = (imgNatural.w || 0) * newScale;
@@ -2087,6 +2482,7 @@ export default function SchoolSetting() {
     },
     [imgNatural.w, imgNatural.h, clamp],
   );
+
   const setActiveMapToServer = useCallback(
     async (mapVersionId) => {
       if (!classroomId || !mapVersionId) {
@@ -2112,6 +2508,14 @@ export default function SchoolSetting() {
 
         setActiveMapVersionId(mapVersionId);
         localStorage.setItem("activeMapVersionId", mapVersionId);
+
+        await syncBeaconMappings(
+          mapVersionId,
+          selectedPlan?.label || "active-map-sync",
+        );
+
+        await logMonitoringMapAfterSync(mapVersionId);
+
         alert("✅ 활성 맵이 변경되었습니다.");
         await fetchMapVersions();
         await fetchActiveMap();
@@ -2126,6 +2530,9 @@ export default function SchoolSetting() {
       showAxiosError,
       fetchMapVersions,
       fetchActiveMap,
+      syncBeaconMappings,
+      logMonitoringMapAfterSync,
+      selectedPlan,
     ],
   );
   const fetchMapVersionDetail = useCallback(
@@ -2232,6 +2639,11 @@ export default function SchoolSetting() {
 
         if (!updated) return;
 
+        if (selectedPlanId === activeMapVersionId) {
+          await syncBeaconMappings(selectedPlanId, label);
+          await logMonitoringMapAfterSync(selectedPlanId);
+        }
+
         await fetchMapVersions();
         setSavePlanName("");
         setIsSavePlanModalOpen(false);
@@ -2290,7 +2702,10 @@ export default function SchoolSetting() {
     fetchMapVersions,
     setActiveMapToServer,
     selectedPlanId,
+    activeMapVersionId,
     updateMapVersionOnServer,
+    syncBeaconMappings,
+    logMonitoringMapAfterSync,
   ]);
 
   useEffect(() => {
@@ -3548,8 +3963,13 @@ export default function SchoolSetting() {
         });
       }
 
-      // ✅ 방 / 재난 구역 / 안전 구역: 타입 변경 + 이름 수정 + 리사이즈
-      if (["방", "재난 구역", "안전 구역"].includes(hit.el.type)) {
+      const hitType = normalizeElementType(
+        hit.el.type || hit.el.elementType || hit.el.zoneType,
+      );
+
+      if (
+        ["방", "FIRE_ZONE", "SAFE_ZONE", "RESTRICTED_ZONE"].includes(hitType)
+      ) {
         opts.push(
           {
             label: "방(파란색)으로 변경",
@@ -3808,8 +4228,15 @@ export default function SchoolSetting() {
 
   function renderResizeHandles(el) {
     if (!el) return null;
-    if (!["방", "제한 구역", "재난 구역", "안전 구역"].includes(el.type))
+    const normalized = normalizeElementType(
+      el.type || el.elementType || el.zoneType,
+    );
+
+    if (
+      !["방", "FIRE_ZONE", "SAFE_ZONE", "RESTRICTED_ZONE"].includes(normalized)
+    ) {
       return null;
+    }
     if (mode !== null) return null;
     if (editingResizeId !== el.id) return null;
 

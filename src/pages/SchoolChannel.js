@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import Navbar from "../components/Navbar";
 
-const API_BASE = "https://disasterar.onenyang.shop";
+const API_BASE = process.env.REACT_APP_API_BASE_URL;
 
 function SchoolChannel() {
   const location = useLocation();
