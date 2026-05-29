@@ -535,13 +535,33 @@ export default function Monitoring() {
     return `/WebGL/index.html?${params.toString()}`;
   }, [monitoringData, selectedFloor]);
 
+  const findZoneElementByMarker = (marker) => {
+    const zoneId = marker?.zoneElementId || marker?.elementId;
+
+    if (!zoneId) return null;
+
+    return (selectedFloor?.elements || []).find((el) => {
+      return String(el.id) === String(zoneId);
+    });
+  };
+
   // =========================
   // marker click
   // =========================
 
   const handleSelectMarker = (marker) => {
     const zoneId = getMarkerZoneId(marker);
-    const position = getMarkerPosition(marker);
+
+    // 2D 표시용 비콘 위치
+    const beaconPosition = getMarkerPosition(marker);
+
+    // Unity 이동용 구역 위치
+    const zoneElement = findZoneElementByMarker(marker);
+
+    const targetX = zoneElement?.x ?? marker.x ?? beaconPosition.x;
+    const targetY = zoneElement?.y ?? marker.y ?? beaconPosition.y;
+    const targetWidth = zoneElement?.width ?? marker.width ?? 0;
+    const targetHeight = zoneElement?.height ?? marker.height ?? 0;
 
     setSelectedMarker(marker);
 
@@ -557,19 +577,30 @@ export default function Monitoring() {
           beaconElementId: marker.beaconElementId || null,
           beaconId: marker.beaconId,
 
-          placementName: marker.placementName,
+          placementName:
+            zoneElement?.name || marker.placementName || "선택 구역",
 
-          x: position.x,
-          y: position.y,
-          width: marker.width,
-          height: marker.height,
+          // Unity 이동은 비콘 좌표가 아니라 구역 좌표 기준
+          x: targetX,
+          y: targetY,
+          width: targetWidth,
+          height: targetHeight,
+
+          // 참고용: 실제 비콘 위치도 같이 보냄
+          beaconX: beaconPosition.x,
+          beaconY: beaconPosition.y,
 
           studentCount: marker.studentCount ?? 0,
           students: marker.students || [],
 
           thresholdRssi: marker.thresholdRssi,
 
-          zoneType: normalizeZoneType(marker.zoneType),
+          zoneType: normalizeZoneType(
+            marker.zoneType ||
+              zoneElement?.zoneType ||
+              zoneElement?.elementType ||
+              zoneElement?.type,
+          ),
         },
       },
       "*",

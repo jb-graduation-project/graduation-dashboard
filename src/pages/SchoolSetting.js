@@ -1407,12 +1407,10 @@ export default function SchoolSetting() {
     }
   }, [classroomId, authHeaders]);
 
-  /*
   useEffect(() => {
     if (!classroomId) return;
     fetchActiveMap();
   }, [classroomId, fetchActiveMap]);
-  */
 
   useEffect(() => {
     if (!schoolId) return;
@@ -2345,8 +2343,18 @@ export default function SchoolSetting() {
     if (!schoolId) return;
 
     fetchBeacons();
-    fetchSchoolMaps();
-  }, [schoolId, fetchBeacons, fetchSchoolMaps]);
+
+    // classroomId가 있으면 active map을 우선 사용
+    // classroomId가 없을 때만 학교 구조도 목록 사용
+    if (!classroomId) {
+      fetchSchoolMaps();
+    }
+  }, [schoolId, classroomId, fetchBeacons, fetchSchoolMaps]);
+
+  useEffect(() => {
+    if (!classroomId) return;
+    fetchActiveMap();
+  }, [classroomId, fetchActiveMap]);
 
   // ====== Zoom & Pan ======
   const [fitScale, setFitScale] = useState(1);
@@ -3977,7 +3985,14 @@ export default function SchoolSetting() {
               pushUndoSnapshot();
               setElements((prev) =>
                 prev.map((p) =>
-                  p.id === hit.el.id ? { ...p, type: "방" } : p,
+                  p.id === hit.el.id
+                    ? {
+                        ...p,
+                        type: "방",
+                        elementType: "방",
+                        zoneType: undefined,
+                      }
+                    : p,
                 ),
               );
               setContextMenu(null);
@@ -3989,7 +4004,14 @@ export default function SchoolSetting() {
               pushUndoSnapshot();
               setElements((prev) =>
                 prev.map((p) =>
-                  p.id === hit.el.id ? { ...p, type: "재난 구역" } : p,
+                  p.id === hit.el.id
+                    ? {
+                        ...p,
+                        type: "FIRE_ZONE",
+                        elementType: "FIRE_ZONE",
+                        zoneType: "FIRE_ZONE",
+                      }
+                    : p,
                 ),
               );
               setContextMenu(null);
@@ -4001,7 +4023,14 @@ export default function SchoolSetting() {
               pushUndoSnapshot();
               setElements((prev) =>
                 prev.map((p) =>
-                  p.id === hit.el.id ? { ...p, type: "안전 구역" } : p,
+                  p.id === hit.el.id
+                    ? {
+                        ...p,
+                        type: "SAFE_ZONE",
+                        elementType: "SAFE_ZONE",
+                        zoneType: "SAFE_ZONE",
+                      }
+                    : p,
                 ),
               );
               setContextMenu(null);
