@@ -97,14 +97,14 @@ export default function Monitoring() {
     }
 
     if (rssi >= -60) {
-      return `강함 (${rssi} dBm)`;
+      return "강함";
     }
 
     if (rssi >= -75) {
-      return `양호 (${rssi} dBm)`;
+      return "양호";
     }
 
-    return `약함 (${rssi} dBm)`;
+    return "약함";
   };
 
   const getMarkerZoneId = (marker) => {
@@ -256,19 +256,19 @@ export default function Monitoring() {
               `${index + 1}층`,
 
             elements:
-              Array.isArray(floor.elements) && floor.elements.length > 0
-                ? floor.elements
-                : Array.isArray(mapFloor?.elements)
-                  ? mapFloor.elements
+              Array.isArray(mapFloor?.elements) && mapFloor.elements.length > 0
+                ? mapFloor.elements
+                : Array.isArray(floor.elements)
+                  ? floor.elements
                   : [],
 
             image: {
               ...floor.image,
 
               src:
-                floor.image?.src ||
                 mapFloor?.image?.src ||
                 mapFloor?.imageSrc ||
+                floor.image?.src ||
                 null,
 
               naturalWidth:
@@ -434,30 +434,101 @@ export default function Monitoring() {
   });
 
   const getMarkerPosition = (marker) => {
-    const matchedBeacon = beaconElements.find((el) => {
-      const elementBeaconId = String(el.serverBeaconId || el.beaconId || "");
+    // 1. 비콘과 연결된 구역 ID
+    const zoneId = marker?.zoneElementId || marker?.elementId;
 
-      const markerBeaconId = String(marker.beaconId || "");
+    // 2. 연결된 구역 찾기
+    const matchedZone = (selectedFloor?.elements || []).find((element) => {
+      return String(element?.id || "") === String(zoneId || "");
+    });
+
+    // 3. 구역이 있으면 구역 중앙에 마커 표시
+    if (matchedZone) {
+      return {
+        x: Number(matchedZone.x || 0) + Number(matchedZone.width || 0) / 2,
+        y: Number(matchedZone.y || 0) + Number(matchedZone.height || 0) / 2,
+      };
+    }
+
+    // 4. 구역 연결이 없으면 실제 비콘 설치 위치 사용
+    const matchedBeacon = beaconElements.find((element) => {
+      const elementBeaconId = String(
+        element.serverBeaconId || element.beaconId || "",
+      );
+
+      const markerBeaconId = String(marker?.beaconId || "");
 
       return (
         elementBeaconId && markerBeaconId && elementBeaconId === markerBeaconId
       );
     });
 
-    // 1순위: SchoolSetting에서 찍은 실제 비콘 좌표
     if (matchedBeacon) {
       return {
-        x: matchedBeacon.x,
-        y: matchedBeacon.y,
+        x: Number(matchedBeacon.x || 0),
+        y: Number(matchedBeacon.y || 0),
       };
     }
 
-    // 2순위: 백엔드 beaconMarkers 좌표
+    // 5. 마지막 fallback
     return {
-      x: marker.x,
-      y: marker.y,
+      x: Number(marker?.x || 0),
+      y: Number(marker?.y || 0),
     };
   };
+
+  const getStudentLocationName = useCallback(
+    (student) => {
+      if (!student) return "미감지";
+
+      const studentBeaconId = String(student.beaconId || "");
+      const studentId = String(student.studentId || "");
+
+      // 전체 층을 순회하면서 학생이 감지된 비콘 찾기
+      for (const floor of floors) {
+        const floorMarkers = Array.isArray(floor?.beaconMarkers)
+          ? floor.beaconMarkers
+          : [];
+
+        const matchedMarker = floorMarkers.find((marker) => {
+          const markerBeaconId = String(marker?.beaconId || "");
+
+          const matchedByBeaconId =
+            studentBeaconId &&
+            markerBeaconId &&
+            studentBeaconId === markerBeaconId;
+
+          const matchedByStudentId = Array.isArray(marker?.students)
+            ? marker.students.some(
+                (item) => String(item?.studentId || "") === studentId,
+              )
+            : false;
+
+          return matchedByBeaconId || matchedByStudentId;
+        });
+
+        if (!matchedMarker) continue;
+
+        const zoneId =
+          matchedMarker.zoneElementId ||
+          matchedMarker.elementId ||
+          matchedMarker.beaconElementId;
+
+        const matchedZone = (floor?.elements || []).find(
+          (element) => String(element?.id || "") === String(zoneId || ""),
+        );
+
+        if (matchedZone?.name) {
+          return matchedZone.name;
+        }
+
+        return "매핑 갱신 필요";
+      }
+
+      return "미감지";
+    },
+    [floors],
+  );
 
   // =========================
   // zone
@@ -507,10 +578,33 @@ export default function Monitoring() {
   // stats
   // =========================
 
-  const totalStudentCount = allStudents.length;
+  // 퇴출된 학생인지 확인
+  const isKickedStudent = useCallback((student) => {
+    if (!student) return false;
 
-  const dangerCount = allStudents.filter((student) =>
-    ["RESTRICTED"].includes(student.status),
+    const status = String(student.status || "")
+      .trim()
+      .toUpperCase();
+    const beaconState = String(student.beaconState || "")
+      .trim()
+      .toUpperCase();
+
+    return (
+      student.isKicked === true ||
+      status === "KICKED" ||
+      beaconState === "KICKED"
+    );
+  }, []);
+
+  // 화면에 표시할 학생: 퇴출 학생 제외
+  const visibleStudents = useMemo(() => {
+    return allStudents.filter((student) => !isKickedStudent(student));
+  }, [allStudents, isKickedStudent]);
+
+  const totalStudentCount = visibleStudents.length;
+
+  const dangerCount = visibleStudents.filter((student) =>
+    ["RESTRICTED"].includes(String(student.status || "").toUpperCase()),
   ).length;
 
   // =========================
@@ -545,6 +639,18 @@ export default function Monitoring() {
     });
   };
 
+  const getMarkerDisplayName = (marker) => {
+    const zoneElement = findZoneElementByMarker(marker);
+
+    // 현재 활성 구조도에서 연결된 구역을 찾은 경우에만 방 이름 표시
+    if (zoneElement?.name) {
+      return zoneElement.name;
+    }
+
+    // 과거 placementName을 그대로 보여주지 않음
+    return "매핑 갱신 필요";
+  };
+
   // =========================
   // marker click
   // =========================
@@ -557,6 +663,11 @@ export default function Monitoring() {
 
     // Unity 이동용 구역 위치
     const zoneElement = findZoneElementByMarker(marker);
+
+    console.log("[Monitoring] 선택 비콘 =", marker);
+    console.log("[Monitoring] 연결 구역 ID =", zoneId);
+    console.log("[Monitoring] 연결 구역 =", zoneElement);
+    console.log("[Monitoring] 표시 좌표 =", beaconPosition);
 
     const targetX = zoneElement?.x ?? marker.x ?? beaconPosition.x;
     const targetY = zoneElement?.y ?? marker.y ?? beaconPosition.y;
@@ -819,7 +930,7 @@ export default function Monitoring() {
                         left,
                         top,
                       }}
-                      title={`${marker.placementName || "비콘"} / 감지 학생 ${
+                      title={`${getMarkerDisplayName(marker)} / 감지 학생 ${
                         marker.studentCount ?? 0
                       }명`}
                     >
@@ -839,26 +950,11 @@ export default function Monitoring() {
                 <div className="space-y-3">
                   <div>
                     <p className="font-bold text-gray-800">
-                      {selectedMarker.placementName || "비콘"}
+                      {getMarkerDisplayName(selectedMarker)}
                     </p>
 
                     <p className="text-sm text-gray-500">
                       {selectedMarker.zoneType}
-                    </p>
-
-                    <p className="text-xs text-gray-500">
-                      구역 ID:{" "}
-                      {selectedMarker.zoneElementId ||
-                        selectedMarker.elementId ||
-                        "-"}
-                    </p>
-
-                    <p className="text-xs text-gray-500">
-                      감지 기준 RSSI:{" "}
-                      {selectedMarker.thresholdRssi !== null &&
-                      selectedMarker.thresholdRssi !== undefined
-                        ? `${selectedMarker.thresholdRssi} dBm`
-                        : "-"}
                     </p>
 
                     <p className="text-xs text-gray-500">
@@ -867,44 +963,46 @@ export default function Monitoring() {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {(selectedMarker.students || []).map((student) => {
-                      const state = getStudentDetectState(student);
+                    {(selectedMarker.students || [])
+                      .filter((student) => !isKickedStudent(student))
+                      .map((student) => {
+                        const state = getStudentDetectState(student);
 
-                      return (
-                        <div
-                          key={student.studentId}
-                          className="rounded-xl border border-[#C8E6C9] bg-white p-4 shadow-sm"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <p className="font-semibold text-gray-800">
-                                {student.studentName}
-                              </p>
+                        return (
+                          <div
+                            key={student.studentId}
+                            className="rounded-xl border border-[#C8E6C9] bg-white p-4 shadow-sm"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="font-semibold text-gray-800">
+                                  {student.studentName}
+                                </p>
 
-                              <p className="mt-1 text-xs text-gray-500">
-                                신호 :{getSignalText(student.lastRssi)}
-                              </p>
+                                <p className="mt-1 text-xs text-gray-500">
+                                  신호 :{getSignalText(student.lastRssi)}
+                                </p>
 
-                              <p className="text-xs text-gray-500">
-                                마지막 감지 :{formatTime(student.lastSeenAt)}
-                              </p>
+                                <p className="text-xs text-gray-500">
+                                  마지막 감지 :{formatTime(student.lastSeenAt)}
+                                </p>
+                              </div>
+
+                              <span
+                                className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                                  state === "DETECTED"
+                                    ? "bg-[#E8F5E9] text-[#2E7D32]"
+                                    : state === "LOST"
+                                      ? "bg-[#FFEBEE] text-[#C62828]"
+                                      : "bg-gray-100 text-gray-700"
+                                }`}
+                              >
+                                {state}
+                              </span>
                             </div>
-
-                            <span
-                              className={`rounded-full px-2 py-1 text-xs font-semibold ${
-                                state === "DETECTED"
-                                  ? "bg-[#E8F5E9] text-[#2E7D32]"
-                                  : state === "LOST"
-                                    ? "bg-[#FFEBEE] text-[#C62828]"
-                                    : "bg-gray-100 text-gray-700"
-                              }`}
-                            >
-                              {state}
-                            </span>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
                   </div>
                 </div>
               )}
@@ -941,7 +1039,7 @@ export default function Monitoring() {
             <h3 className="text-xl font-bold text-[#2E7D32]">전체 학생 현황</h3>
 
             <span className="text-sm text-gray-500">
-              총 {allStudents.length}명
+              총 {visibleStudents.length}명
             </span>
           </div>
 
@@ -972,15 +1070,17 @@ export default function Monitoring() {
               </thead>
 
               <tbody>
-                {allStudents.map((student) => {
+                {visibleStudents.map((student) => {
                   const state = getStudentDetectState(student);
 
                   return (
                     <tr key={student.studentId}>
+                      {/* 학생명 */}
                       <td className="border-b px-4 py-3 text-gray-700">
-                        {student.studentName}
+                        {student.studentName || "이름 없음"}
                       </td>
 
+                      {/* 상태 */}
                       <td className="border-b px-4 py-3">
                         <span
                           className={`rounded-full px-2 py-1 text-xs font-semibold ${
@@ -995,17 +1095,17 @@ export default function Monitoring() {
                         </span>
                       </td>
 
+                      {/* 위치 */}
                       <td className="border-b px-4 py-3 text-gray-700">
-                        {student.placementName ||
-                          student.zoneName ||
-                          student.beaconId ||
-                          "미감지"}
+                        {getStudentLocationName(student)}
                       </td>
 
+                      {/* 신호 */}
                       <td className="border-b px-4 py-3 text-gray-700">
                         {getSignalText(student.lastRssi)}
                       </td>
 
+                      {/* 마지막 감지 */}
                       <td className="border-b px-4 py-3 text-gray-700">
                         {formatTime(student.lastSeenAt)}
                       </td>

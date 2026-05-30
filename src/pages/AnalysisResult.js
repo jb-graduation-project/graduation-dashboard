@@ -33,6 +33,7 @@ function AnalysisResult() {
 
   const [scenarioEvaluation, setScenarioEvaluation] = useState(null);
   const [studentEvaluations, setStudentEvaluations] = useState([]);
+  const [studentNameMap, setStudentNameMap] = useState({});
 
   const fetchEvaluations = useCallback(async () => {
     if (!scenarioId) {
@@ -114,6 +115,70 @@ function AnalysisResult() {
     }
   }, [scenarioId, runEvaluate]);
 
+  useEffect(() => {
+    const fetchStudentNames = async () => {
+      const classroomId = localStorage.getItem("classroomId");
+
+      if (!classroomId) {
+        console.warn("[AnalysisResult] classroomId가 없어 학생 이름 조회 생략");
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem("token");
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/rooms/${classroomId}/students`,
+          {
+            method: "GET",
+            headers: {
+              accept: "application/json",
+              ...(token
+                ? {
+                    Authorization: `Bearer ${token}`,
+                  }
+                : {}),
+            },
+          },
+        );
+
+        if (!response.ok) {
+          throw new Error(`학생 목록 조회 실패: ${response.status}`);
+        }
+
+        const students = await response.json();
+
+        const nextMap = {};
+
+        if (Array.isArray(students)) {
+          students.forEach((student) => {
+            if (!student?.studentId) return;
+
+            nextMap[String(student.studentId)] =
+              student.studentName || "이름 없음";
+          });
+        }
+
+        setStudentNameMap(nextMap);
+      } catch (err) {
+        console.error("[AnalysisResult] 학생 이름 조회 실패", err);
+      }
+    };
+
+    fetchStudentNames();
+  }, []);
+
+  const getStudentName = (student) => {
+    if (!student) return "이름 없음";
+
+    return (
+      student.studentName ||
+      student.name ||
+      studentNameMap[String(student.studentId || "")] ||
+      "이름 없음"
+    );
+  };
+
   const scenarioScoreJson = useMemo(() => {
     return safeJsonParse(scenarioEvaluation?.scoreJson, {});
   }, [scenarioEvaluation]);
@@ -187,9 +252,6 @@ function AnalysisResult() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h2 className="text-3xl font-bold text-[#2E7D32]">분석 결과</h2>
-            <p className="text-sm text-gray-500 mt-1">
-              시나리오 ID: {scenarioId || "-"}
-            </p>
           </div>
 
           <button
@@ -308,9 +370,7 @@ function AnalysisResult() {
             <table className="min-w-full border border-gray-200 text-sm">
               <thead className="bg-[#2E7D32] text-white">
                 <tr>
-                  <th className="px-4 py-3 border whitespace-nowrap">
-                    학생 ID
-                  </th>
+                  <th className="px-4 py-3 border whitespace-nowrap">학생명</th>
                   <th className="px-4 py-3 border whitespace-nowrap">총점</th>
                   <th className="px-4 py-3 border whitespace-nowrap">퀴즈</th>
                   <th className="px-4 py-3 border whitespace-nowrap">역할</th>
@@ -359,7 +419,7 @@ function AnalysisResult() {
                         className="hover:bg-gray-50"
                       >
                         <td className="px-4 py-3 border font-medium whitespace-nowrap">
-                          {student.studentId || "-"}
+                          {getStudentName(student)}
                         </td>
 
                         <td className="px-4 py-3 border text-center font-bold text-[#2E7D32] whitespace-nowrap">

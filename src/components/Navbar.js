@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 
-const API_BASE = "https://disasterar.onenyang.shop";
+const API_BASE = process.env.REACT_APP_API_BASE_URL;
 
 function Navbar() {
   const navigate = useNavigate();
@@ -126,27 +126,76 @@ function Navbar() {
   const schoolName = location.state?.schoolName || null;
   const schoolCode = location.state?.schoolCode || null;
 
+  const activeScenarioId = useMemo(() => {
+    try {
+      const gameContext = JSON.parse(
+        localStorage.getItem("gameContext") || "{}",
+      );
+
+      return (
+        gameContext?.scenarioId ||
+        gameContext?.activeScenarioId ||
+        location.state?.scenarioId ||
+        location.state?.activeScenarioId ||
+        null
+      );
+    } catch {
+      return (
+        location.state?.scenarioId || location.state?.activeScenarioId || null
+      );
+    }
+  }, [location.state]);
+
+  const handleNavigate = (item) => {
+    if (item.path === "/analysis") {
+      if (!activeScenarioId) {
+        alert(
+          "조회할 분석 결과가 없습니다.\n훈련을 먼저 시작하고 종료해 주세요.",
+        );
+        return;
+      }
+
+      navigate(`/analysis/${activeScenarioId}`, {
+        state: {
+          ...location.state,
+          classroomId,
+          schoolId,
+          schoolName,
+          schoolCode,
+          scenarioId: activeScenarioId,
+          activeScenarioId,
+          thumbnailImage: location.state?.thumbnailImage || null,
+        },
+      });
+
+      return;
+    }
+
+    navigate(item.path, {
+      state: {
+        ...location.state,
+        classroomId,
+        schoolId,
+        schoolName,
+        schoolCode,
+        thumbnailImage: location.state?.thumbnailImage || null,
+      },
+    });
+  };
+
   return (
     <nav className="relative w-full h-20 flex items-center px-4 overflow-visible">
       {/* 가운데 정렬될 메뉴들 */}
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-2 whitespace-nowrap">
         {navItems.map((item) => {
-          const isActive = location.pathname === item.path;
+          const isActive =
+            item.path === "/analysis"
+              ? location.pathname.startsWith("/analysis/")
+              : location.pathname === item.path;
           return (
             <button
               key={item.path}
-              onClick={() =>
-                navigate(item.path, {
-                  state: {
-                    ...location.state,
-                    classroomId,
-                    schoolId,
-                    schoolName,
-                    schoolCode,
-                    thumbnailImage: location.state?.thumbnailImage || null,
-                  },
-                })
-              }
+              onClick={() => handleNavigate(item)}
               className={`px-4 py-2 rounded-full border border-green-600 font-semibold transition
                 ${
                   isActive

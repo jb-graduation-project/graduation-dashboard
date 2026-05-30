@@ -130,7 +130,20 @@ function SchoolChannel() {
       }
 
       const list = Array.isArray(res.data) ? res.data : [];
-      const visibleList = list.filter((s) => !s.isKicked);
+
+      const visibleList = list
+        .filter((student) => !student.isKicked)
+        .sort((a, b) => {
+          const aTime = new Date(
+            a.joinedAt || a.createdAt || a.enteredAt || a.registeredAt || 0,
+          ).getTime();
+
+          const bTime = new Date(
+            b.joinedAt || b.createdAt || b.enteredAt || b.registeredAt || 0,
+          ).getTime();
+
+          return bTime - aTime;
+        });
 
       setStudents(visibleList);
       setStudentCount(visibleList.length);
@@ -458,7 +471,9 @@ function SchoolChannel() {
     }
 
     const stored = getStoredGameContext();
+
     const scenarioId = stored?.scenarioId || stored?.activeScenarioId || null;
+
     const endedAt = getIsoNow();
 
     const payload = {
@@ -476,7 +491,10 @@ function SchoolChannel() {
         `${API_BASE}/api/rooms/${classroomId}/training/end`,
         payload,
         {
-          headers: { "Content-Type": "application/json", ...authHeaders },
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders,
+          },
           timeout: 10000,
           validateStatus: () => true,
         },
@@ -487,17 +505,29 @@ function SchoolChannel() {
         return;
       }
 
+      const resultScenarioId =
+        res.data?.activeScenarioId || res.data?.scenarioId || scenarioId;
+
       const nextContext = {
         ...stored,
         trainingState: res.data?.trainingState || "ENDED",
         trainingStartedAt:
           res.data?.trainingStartedAt || stored?.trainingStartedAt || null,
         trainingEndedAt: res.data?.trainingEndedAt || endedAt,
-        activeScenarioId: res.data?.activeScenarioId || scenarioId,
+        activeScenarioId: resultScenarioId,
+        scenarioId: resultScenarioId,
       };
 
       saveGameContext(nextContext);
+
+      if (!resultScenarioId) {
+        alert("훈련은 종료되었지만 분석 결과를 불러올 시나리오 ID가 없습니다.");
+        return;
+      }
+
       alert("훈련이 종료되었습니다.");
+
+      navigate(`/analysis/${resultScenarioId}`);
     } catch (err) {
       showError("훈련 종료 상태 저장 중 오류", err);
     } finally {
