@@ -9,7 +9,8 @@ import React, {
 import Navbar from "../components/Navbar";
 import axios from "axios";
 import { useLocation } from "react-router-dom";
-import API_BASE from "../apiBase";
+
+const API_BASE = process.env.REACT_APP_API_BASE_URL;
 
 export default function SchoolSetting() {
   const location = useLocation();
@@ -48,6 +49,8 @@ export default function SchoolSetting() {
       null
     );
   }, [location.state]);
+
+  const [showGuideModal, setShowGuideModal] = useState(false);
 
   const userId = useMemo(() => {
     try {
@@ -209,19 +212,181 @@ export default function SchoolSetting() {
     typeof n === "number" ? Math.round(n * 10000) / 10000 : n;
 
   function typeColor(type, alpha = 0.25) {
-    switch (type) {
-      case "제한 구역":
+    const normalized = normalizeElementType(type);
+
+    switch (normalized) {
+      case "RESTRICTED_ZONE":
         return `rgba(255,165,0,${alpha})`;
-      case "재난 구역":
+
+      case "FIRE_ZONE":
         return `rgba(255,0,0,${alpha})`;
-      case "안전 구역":
+
+      case "SAFE_ZONE":
         return `rgba(0,200,0,${alpha})`;
+
       case "방":
         return `rgba(0,112,255,${alpha})`;
+
       default:
         return `rgba(0,0,0,0)`;
     }
   }
+
+  const getServerFloorIndex = (floor, idx) => {
+    const fromFloor =
+      floor?.floorIndex ??
+      floor?.floor_index ??
+      floor?.floor ??
+      floor?.index ??
+      floor?.floorNo ??
+      floor?.floorNumber ??
+      floor?.serverFloorIndex;
+
+    if (fromFloor !== undefined && fromFloor !== null && fromFloor !== "") {
+      return Number(fromFloor);
+    }
+
+    const fromElement = (floor?.elements || [])
+      .map(
+        (el) =>
+          el?.floorIndex ??
+          el?.floor_index ??
+          el?.floor ??
+          el?.floorNo ??
+          el?.floorNumber,
+      )
+      .find((v) => v !== undefined && v !== null && v !== "");
+
+    if (fromElement !== undefined) {
+      return Number(fromElement);
+    }
+
+    return Number(idx);
+  };
+
+  const normalizeElementType = (type) => {
+    const raw = String(type ?? "").trim();
+    const compact = raw.replace(/\s+/g, "");
+    const upper = raw.toUpperCase();
+
+    if (
+      upper === "FIRE_ZONE" ||
+      upper === "DANGER_ZONE" ||
+      upper === "DISASTER_ZONE" ||
+      compact === "재난구역" ||
+      compact === "화재구역"
+    ) {
+      return "FIRE_ZONE";
+    }
+
+    if (
+      upper === "SAFE_ZONE" ||
+      compact === "안전구역" ||
+      compact === "대피구역"
+    ) {
+      return "SAFE_ZONE";
+    }
+
+    if (
+      upper === "RESTRICTED_ZONE" ||
+      compact === "제한구역" ||
+      compact === "출입제한"
+    ) {
+      return "RESTRICTED_ZONE";
+    }
+
+    if (upper === "BEACON" || compact === "비콘") {
+      return "BEACON";
+    }
+
+    return raw;
+  };
+
+  const isZoneElement = (el) => {
+    const normalized = normalizeElementType(el?.elementType ?? el?.type);
+
+    return ["FIRE_ZONE", "SAFE_ZONE", "RESTRICTED_ZONE"].includes(normalized);
+  };
+
+  const normalizeElementForSave = (el, serverFloorIndex) => {
+    const normalizedType = normalizeElementType(el.elementType ?? el.type);
+
+    if (el.type === "비콘" || normalizedType === "BEACON") {
+      return {
+        id: el.id,
+        type: "비콘",
+        elementType: "BEACON",
+
+        floorIndex: serverFloorIndex,
+        floor: serverFloorIndex,
+
+        x: Number(el.x ?? 0),
+        y: Number(el.y ?? 0),
+        width: Number(el.width ?? 28),
+        height: Number(el.height ?? 28),
+        beaconNo: Number(el.beaconNo ?? 0),
+        name: el.name || "",
+        beaconUuid: el.beaconUuid || el.uuid || "",
+        beaconMajor: el.beaconMajor ?? el.major ?? "",
+        beaconMinor: el.beaconMinor ?? el.minor ?? "",
+        serverBeaconId: el.serverBeaconId || el.beaconId || "",
+      };
+    }
+
+    if (isZoneElement(el)) {
+      return {
+        id: el.id,
+        type: normalizedType,
+        elementType: normalizedType,
+        zoneType: normalizedType,
+
+        floorIndex: serverFloorIndex,
+        floor: serverFloorIndex,
+
+        x: Number(el.x ?? 0),
+        y: Number(el.y ?? 0),
+        width: Number(el.width ?? 0),
+        height: Number(el.height ?? 0),
+        name: el.name || el.placementName || "",
+      };
+    }
+
+    if (el.type === "건물윤곽") {
+      return {
+        id: el.id,
+        type: el.type,
+        elementType: el.elementType || el.type,
+        floor: serverFloorIndex,
+        points: Array.isArray(el.points) ? el.points : [],
+        rawPoints: Array.isArray(el.rawPoints) ? el.rawPoints : [],
+      };
+    }
+
+    if (el.type === "문") {
+      return {
+        id: el.id,
+        type: el.type,
+        elementType: el.elementType || el.type,
+        floor: serverFloorIndex,
+        x: Number(el.x ?? 0),
+        y: Number(el.y ?? 0),
+        angle: Number(el.angle ?? 0),
+      };
+    }
+
+    return {
+      id: el.id,
+      type: el.type,
+      elementType: el.elementType || el.type,
+      floor: serverFloorIndex,
+      x: Number(el.x ?? 0),
+      y: Number(el.y ?? 0),
+      width: Number(el.width ?? 0),
+      height: Number(el.height ?? 0),
+      name: el.name || "",
+    };
+  };
+
   // ====== Floor model ======
   const makeEmptyFloor = useCallback(() => {
     return {
@@ -705,10 +870,15 @@ export default function SchoolSetting() {
     try {
       setMappingLoading(true);
 
+      const serverFloorIndex = getServerFloorIndex(
+        floors[currentFloorIndex],
+        currentFloorIndex,
+      );
+
       const res = await axios.get(`${API_BASE}/api/beacon-element-maps`, {
         params: {
           schoolId,
-          floorIndex: currentFloorIndex,
+          floorIndex: serverFloorIndex,
         },
         headers: { ...authHeaders },
         timeout: 10000,
@@ -733,68 +903,83 @@ export default function SchoolSetting() {
     }
   }, [schoolId, currentFloorIndex, authHeaders, showAxiosError]);
 
-  const createBeaconElementMap = useCallback(async () => {
-    if (!schoolId) {
-      alert("schoolId가 없습니다.");
-      return;
-    }
-
-    if (!selectedBeaconForMap) {
-      alert("비콘을 선택하세요.");
-      return;
-    }
-
-    if (!selectedElementForMap) {
-      alert("구조도 요소를 선택하세요.");
-      return;
-    }
-
-    const payload = {
-      schoolId,
-      floorIndex: currentFloorIndex,
-      beaconId: selectedBeaconForMap,
-      elementId: selectedElementForMap,
-    };
-
-    console.log("비콘-element 매핑 생성 payload =", payload);
-
-    try {
-      const res = await axios.post(
-        `${API_BASE}/api/beacon-element-maps`,
-        payload,
-        {
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          timeout: 10000,
-          validateStatus: () => true,
-        },
-      );
-
-      console.log("비콘-element 매핑 생성 응답 =", res.status, res.data);
-
-      if (!(res.status >= 200 && res.status < 300)) {
-        showAxiosError("비콘-element 매핑 생성 실패", res);
-        return;
+  const syncBeaconMappings = useCallback(
+    async (mapVersionId, label = "") => {
+      if (!classroomId || !mapVersionId) {
+        console.warn("sync 생략: classroomId 또는 mapVersionId 없음");
+        return null;
       }
 
-      alert("✅ 비콘과 구조도 요소가 연결되었습니다.");
+      const payload = {
+        classroomId,
+        activeMapVersionId: mapVersionId,
+        label: label || "active-map-sync",
+      };
 
-      setSelectedBeaconForMap("");
-      setSelectedElementForMap("");
+      try {
+        const res = await axios.post(
+          `${API_BASE}/api/rooms/${classroomId}/beacon-mappings/sync`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
 
-      await fetchBeaconElementMaps();
-    } catch (err) {
-      console.error(err);
-      showAxiosError("비콘-element 매핑 생성 중 오류", err);
-    }
-  }, [
-    schoolId,
-    currentFloorIndex,
-    selectedBeaconForMap,
-    selectedElementForMap,
-    authHeaders,
-    showAxiosError,
-    fetchBeaconElementMaps,
-  ]);
+        console.log("beacon-mappings sync 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("비콘 매핑 동기화 실패", res);
+          return null;
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error("비콘 매핑 동기화 중 오류 =", err);
+        showAxiosError("비콘 매핑 동기화 중 오류", err);
+        return null;
+      }
+    },
+    [classroomId, authHeaders, showAxiosError],
+  );
+
+  const logMonitoringMapAfterSync = useCallback(
+    async (mapVersionId) => {
+      if (!classroomId) return;
+
+      try {
+        const res = await axios.get(
+          `${API_BASE}/api/rooms/${classroomId}/monitoring-map`,
+          {
+            headers: { ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("sync 후 monitoring-map 상태 =", res.status, res.data);
+
+        const floors = res.data?.floors || [];
+        console.log(
+          "sync 후 beaconMarkers 요약 =",
+          floors.map((floor, index) => ({
+            index,
+            floorIndex: floor.floorIndex,
+            floorLabel: floor.floorLabel,
+            beaconMarkersCount: floor.beaconMarkers?.length || 0,
+            beaconMarkers: floor.beaconMarkers || [],
+          })),
+        );
+
+        return res.data || null;
+      } catch (err) {
+        console.error("sync 후 monitoring-map 확인 실패 =", err);
+        return null;
+      }
+    },
+    [classroomId, authHeaders],
+  );
 
   const deleteBeaconElementMap = useCallback(
     async (mappingId) => {
@@ -831,6 +1016,132 @@ export default function SchoolSetting() {
     },
     [authHeaders, showAxiosError, fetchBeaconElementMaps],
   );
+  const findAutoZoneForBeacon = useCallback(
+    (beacon, floorIdx) => {
+      const currentElements = floors[floorIdx]?.elements || [];
+
+      const zoneElements = currentElements.filter((el) => {
+        const normalized = normalizeElementType(
+          el.zoneType || el.elementType || el.type,
+        );
+
+        return ["FIRE_ZONE", "SAFE_ZONE", "RESTRICTED_ZONE"].includes(
+          normalized,
+        );
+      });
+
+      if (!zoneElements.length) return null;
+
+      // 1순위: 비콘 좌표가 구역 내부에 있는 경우
+      const containingZone = zoneElements.find((zone) => {
+        const x = Number(zone.x || 0);
+        const y = Number(zone.y || 0);
+        const width = Number(zone.width || 0);
+        const height = Number(zone.height || 0);
+
+        return (
+          beacon.x >= x &&
+          beacon.x <= x + width &&
+          beacon.y >= y &&
+          beacon.y <= y + height
+        );
+      });
+
+      if (containingZone) return containingZone;
+
+      // 2순위: 가장 가까운 구역
+      const beaconX = Number(beacon.x || 0);
+      const beaconY = Number(beacon.y || 0);
+
+      let nearestZone = null;
+      let nearestDistance = Infinity;
+
+      zoneElements.forEach((zone) => {
+        const centerX = Number(zone.x || 0) + Number(zone.width || 0) / 2;
+        const centerY = Number(zone.y || 0) + Number(zone.height || 0) / 2;
+
+        const distance = Math.hypot(beaconX - centerX, beaconY - centerY);
+
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestZone = zone;
+        }
+      });
+
+      return nearestZone;
+    },
+    [floors],
+  );
+
+  const createBeaconElementMapAuto = useCallback(
+    async ({ beaconId, zoneElementId, floorIndex }) => {
+      if (!schoolId || !beaconId || !zoneElementId) {
+        console.warn("자동 비콘 매핑 생략", {
+          schoolId,
+          beaconId,
+          zoneElementId,
+        });
+        return null;
+      }
+
+      const payload = {
+        schoolId,
+        floorIndex,
+        beaconId,
+        elementId: zoneElementId,
+      };
+
+      console.log("자동 비콘-element 매핑 payload =", payload);
+
+      try {
+        const res = await axios.post(
+          `${API_BASE}/api/beacon-element-maps`,
+          payload,
+          {
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
+
+        console.log("자동 비콘-element 매핑 응답 =", res.status, res.data);
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          showAxiosError("자동 비콘-element 매핑 생성 실패", res);
+          return null;
+        }
+
+        await fetchBeaconElementMaps();
+
+        const targetMapVersionId =
+          activeMapVersionId || localStorage.getItem("activeMapVersionId");
+
+        if (targetMapVersionId) {
+          await syncBeaconMappings(targetMapVersionId, "auto-beacon-map-sync");
+          await logMonitoringMapAfterSync(targetMapVersionId);
+        } else {
+          console.warn(
+            "activeMapVersionId가 없어서 자동 sync를 실행하지 못했습니다.",
+          );
+        }
+
+        return res.data || null;
+      } catch (err) {
+        console.error("자동 비콘-element 매핑 중 오류 =", err);
+        showAxiosError("자동 비콘-element 매핑 중 오류", err);
+        return null;
+      }
+    },
+    [
+      schoolId,
+      authHeaders,
+      showAxiosError,
+      fetchBeaconElementMaps,
+      activeMapVersionId,
+      syncBeaconMappings,
+      logMonitoringMapAfterSync,
+    ],
+  );
 
   const confirmAddBeacon = useCallback(async () => {
     console.log("===== 비콘 추가 클릭 =====");
@@ -855,6 +1166,7 @@ export default function SchoolSetting() {
     if (!Number.isInteger(minorNum)) return alert("Minor는 정수로 입력하세요.");
 
     const floorIdx = pendingBeaconNat.floorIdx ?? currentFloorIndex;
+    const serverFloorIndex = getServerFloorIndex(floors[floorIdx], floorIdx);
 
     pushUndoSnapshot();
 
@@ -870,7 +1182,7 @@ export default function SchoolSetting() {
 
       const payload = {
         schoolId,
-        floorIndex: floorIdx,
+        floorIndex: serverFloorIndex,
         uuid,
         major: majorNum,
         minor: minorNum,
@@ -894,9 +1206,11 @@ export default function SchoolSetting() {
           if (el.id !== editingBeaconId) return el;
           return {
             ...el,
+            floor: serverFloorIndex,
             beaconUuid: uuid,
             beaconMajor: majorNum,
             beaconMinor: minorNum,
+            serverBeaconId,
             x: pendingBeaconNat.x,
             y: pendingBeaconNat.y,
             width: el.width || BEACON_SIZE,
@@ -918,7 +1232,7 @@ export default function SchoolSetting() {
 
     // 추가 모드
     const created = await createBeaconOnServer({
-      floorIndex: floorIdx,
+      floorIndex: serverFloorIndex,
       x: pendingBeaconNat.x,
       y: pendingBeaconNat.y,
       uuid,
@@ -933,11 +1247,12 @@ export default function SchoolSetting() {
     const newBeacon = {
       id,
       type: "비콘",
+      elementType: "BEACON",
       x: pendingBeaconNat.x,
       y: pendingBeaconNat.y,
       width: BEACON_SIZE,
       height: BEACON_SIZE,
-      floor: floorIdx,
+      floor: serverFloorIndex,
       beaconUuid: uuid,
       beaconMajor: majorNum,
       beaconMinor: minorNum,
@@ -966,6 +1281,21 @@ export default function SchoolSetting() {
 
     await fetchBeacons();
 
+    // ✅ 비콘 추가 후 자동으로 구역 연결
+    const autoZone = findAutoZoneForBeacon(newBeacon, floorIdx);
+
+    if (autoZone) {
+      await createBeaconElementMapAuto({
+        beaconId: created.beaconId,
+        zoneElementId: autoZone.id,
+        floorIndex: serverFloorIndex,
+      });
+
+      console.log("자동 연결된 구역 =", autoZone);
+    } else {
+      console.warn("자동 연결할 재난/안전/제한 구역을 찾지 못했습니다.");
+    }
+
     setIsBeaconModalOpen(false);
     setPendingBeaconNat(null);
     setEditingBeaconId(null);
@@ -977,6 +1307,7 @@ export default function SchoolSetting() {
     pushUndoSnapshot,
     editingBeaconId,
     elements,
+    floors,
     schoolId,
     BEACON_SIZE,
     updateBeaconOnServer,
@@ -985,6 +1316,8 @@ export default function SchoolSetting() {
     setElements,
     setSelectedId,
     setSelectedIds,
+    findAutoZoneForBeacon,
+    createBeaconElementMapAuto,
   ]);
 
   // 현재 파일의 “층 라벨”
@@ -993,17 +1326,27 @@ export default function SchoolSetting() {
   }, [currentFloorIndex, floorNames]);
 
   const buildFloorsPayload = useCallback(() => {
-    return floors.map((f, idx) => ({
-      name: floorNames[idx] || `${idx + 1}층`,
-      image: {
-        src: f.imageSrc || null,
-        natural: f.imgNatural || { w: 0, h: 0 },
-      },
-      elements: (f.elements || []).map((el) => ({
-        ...el,
-        floor: idx,
-      })),
-    }));
+    return floors.map((f, idx) => {
+      const serverFloorIndex = getServerFloorIndex(f, idx);
+
+      const floorLabel =
+        floorNames[idx] || f.floorLabel || `${serverFloorIndex}층`;
+
+      return {
+        floorIndex: serverFloorIndex,
+        floor: serverFloorIndex,
+        index: serverFloorIndex,
+        floorLabel,
+        name: floorLabel,
+        image: {
+          src: f.imageSrc || null,
+          natural: f.imgNatural || { w: 0, h: 0 },
+        },
+        elements: (f.elements || []).map((el) =>
+          normalizeElementForSave(el, serverFloorIndex),
+        ),
+      };
+    });
   }, [floors, floorNames]);
 
   const fetchActiveMap = useCallback(async () => {
@@ -1031,20 +1374,29 @@ export default function SchoolSetting() {
       setFloorNames(parsedFloors.map((f, idx) => f?.name || `${idx + 1}층`));
 
       setFloors(
-        parsedFloors.map((f, idx) => ({
-          imageSrc: f?.image?.src || null,
-          uploadedFile: null,
-          imgNatural: f?.image?.natural || { w: 0, h: 0 },
-          elements: Array.isArray(f?.elements)
-            ? f.elements.map((el) => ({ ...el, floor: idx }))
-            : [],
-          undoStack: [],
-          redoStack: [],
-          hasAutoAnalysisResult: false,
-          autoElementsCache: [],
-          autoAnalysisHidden: false,
-          abort: { analyze: null },
-        })),
+        parsedFloors.map((f, idx) => {
+          const serverFloorIndex = getServerFloorIndex(f, idx);
+
+          return {
+            floorIndex: serverFloorIndex,
+            floorLabel: f?.floorLabel || f?.name || `${serverFloorIndex}층`,
+            imageSrc: f?.image?.src || null,
+            uploadedFile: null,
+            imgNatural: f?.image?.natural || { w: 0, h: 0 },
+            elements: Array.isArray(f?.elements)
+              ? f.elements.map((el) => ({
+                  ...el,
+                  floor: Number(el.floor ?? serverFloorIndex),
+                }))
+              : [],
+            undoStack: [],
+            redoStack: [],
+            hasAutoAnalysisResult: false,
+            autoElementsCache: [],
+            autoAnalysisHidden: false,
+            abort: { analyze: null },
+          };
+        }),
       );
 
       setCurrentFloorIndex((prev) =>
@@ -1055,18 +1407,16 @@ export default function SchoolSetting() {
     }
   }, [classroomId, authHeaders]);
 
-  /*
   useEffect(() => {
     if (!classroomId) return;
     fetchActiveMap();
   }, [classroomId, fetchActiveMap]);
-  */
 
   useEffect(() => {
     if (!schoolId) return;
 
     fetchBeaconElementMaps();
-  }, [schoolId, currentFloorIndex, fetchBeaconElementMaps]);
+  }, [schoolId, currentFloorIndex, floors, authHeaders, showAxiosError]);
 
   const fetchSchoolMaps = useCallback(async () => {
     if (!schoolId) return;
@@ -1144,13 +1494,20 @@ export default function SchoolSetting() {
           const keepNatural =
             prevFloor?.imageSrc === nextImageSrc ? prevFloor.imgNatural : null;
 
+          const serverFloorIndex = Number(m.floorIndex ?? idx + 1);
+
           return {
             mapId: m.mapId,
+            floorIndex: serverFloorIndex,
+            floorLabel: m.floorLabel || `${serverFloorIndex}층`,
             imageSrc: nextImageSrc,
             uploadedFile: null,
             imgNatural: keepNatural || { w: 0, h: 0 },
             elements: Array.isArray(parsedElements)
-              ? parsedElements.map((el) => ({ ...el, floor: idx }))
+              ? parsedElements.map((el) => ({
+                  ...el,
+                  floor: Number(el.floor ?? serverFloorIndex),
+                }))
               : [],
             undoStack: [],
             redoStack: [],
@@ -1217,65 +1574,20 @@ export default function SchoolSetting() {
 
       const rawElements = overrideElements || floor.elements || [];
 
-      const normalizedElements = rawElements.map((el) => {
-        // 건물 윤곽은 points/rawPoints 중심으로 저장
-        if (el.type === "건물윤곽") {
-          return {
-            id: el.id,
-            type: el.type,
-            floor: el.floor ?? floorIdx,
-            points: Array.isArray(el.points) ? el.points : [],
-            rawPoints: Array.isArray(el.rawPoints) ? el.rawPoints : [],
-          };
-        }
+      const serverFloorIndex = getServerFloorIndex(floor, floorIdx);
 
-        // 비콘은 프론트 전용 필드(serverBeaconId, beaconUuid 등)를 최대한 빼고 저장
-        if (el.type === "비콘") {
-          return {
-            id: el.id,
-            type: el.type,
-            floor: el.floor ?? floorIdx,
-            x: Number(el.x ?? 0),
-            y: Number(el.y ?? 0),
-            width: Number(el.width ?? 28),
-            height: Number(el.height ?? 28),
-            beaconNo: Number(el.beaconNo ?? 0),
-            name: el.name || "",
-          };
-        }
-
-        // 문
-        if (el.type === "문") {
-          return {
-            id: el.id,
-            type: el.type,
-            floor: el.floor ?? floorIdx,
-            x: Number(el.x ?? 0),
-            y: Number(el.y ?? 0),
-            angle: Number(el.angle ?? 0),
-          };
-        }
-
-        // 일반 박스형 요소(방, 제한구역 등)
-        return {
-          id: el.id,
-          type: el.type,
-          floor: el.floor ?? floorIdx,
-          x: Number(el.x ?? 0),
-          y: Number(el.y ?? 0),
-          width: Number(el.width ?? 0),
-          height: Number(el.height ?? 0),
-          name: el.name || "",
-        };
-      });
+      const normalizedElements = rawElements.map((el) =>
+        normalizeElementForSave(el, serverFloorIndex),
+      );
 
       const outlineList = normalizedElements.filter(
         (el) => el.type === "건물윤곽",
       );
 
       const payload = {
-        floorIndex: floorIdx,
-        floorLabel: floorNames[floorIdx] || `${floorIdx + 1}층`,
+        floorIndex: serverFloorIndex,
+        floorLabel:
+          floorNames[floorIdx] || floor.floorLabel || `${serverFloorIndex}층`,
         outlineJson: JSON.stringify(outlineList),
         scaleMPerPx: 0,
         originX: 0,
@@ -2031,8 +2343,18 @@ export default function SchoolSetting() {
     if (!schoolId) return;
 
     fetchBeacons();
-    fetchSchoolMaps();
-  }, [schoolId, fetchBeacons, fetchSchoolMaps]);
+
+    // classroomId가 있으면 active map을 우선 사용
+    // classroomId가 없을 때만 학교 구조도 목록 사용
+    if (!classroomId) {
+      fetchSchoolMaps();
+    }
+  }, [schoolId, classroomId, fetchBeacons, fetchSchoolMaps]);
+
+  useEffect(() => {
+    if (!classroomId) return;
+    fetchActiveMap();
+  }, [classroomId, fetchActiveMap]);
 
   // ====== Zoom & Pan ======
   const [fitScale, setFitScale] = useState(1);
@@ -2057,6 +2379,90 @@ export default function SchoolSetting() {
   console.log("displayedW, displayedH =", displayedW, displayedH);
   console.log("viewportCenter =", viewportCenterX, viewportCenterY);
   console.log("imgLeft, imgTop =", imgLeft, imgTop);
+
+  const createBeaconElementMap = useCallback(async () => {
+    if (!schoolId) {
+      alert("schoolId가 없습니다.");
+      return;
+    }
+
+    if (!selectedBeaconForMap) {
+      alert("비콘을 선택하세요.");
+      return;
+    }
+
+    if (!selectedElementForMap) {
+      alert("구조도 요소를 선택하세요.");
+      return;
+    }
+
+    const serverFloorIndex = getServerFloorIndex(
+      floors[currentFloorIndex],
+      currentFloorIndex,
+    );
+
+    const payload = {
+      schoolId,
+      floorIndex: serverFloorIndex,
+      beaconId: selectedBeaconForMap,
+      elementId: selectedElementForMap,
+    };
+
+    console.log("비콘-element 매핑 생성 payload =", payload);
+
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/beacon-element-maps`,
+        payload,
+        {
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
+
+      console.log("비콘-element 매핑 생성 응답 =", res.status, res.data);
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("비콘-element 매핑 생성 실패", res);
+        return;
+      }
+
+      alert("✅ 비콘과 구조도 요소가 연결되었습니다.");
+
+      setSelectedBeaconForMap("");
+      setSelectedElementForMap("");
+
+      await fetchBeaconElementMaps();
+
+      const targetMapVersionId =
+        activeMapVersionId || localStorage.getItem("activeMapVersionId");
+
+      if (targetMapVersionId) {
+        await syncBeaconMappings(targetMapVersionId, "beacon-map-sync");
+        await logMonitoringMapAfterSync(targetMapVersionId);
+      } else {
+        console.warn(
+          "activeMapVersionId가 없어서 beacon sync를 실행하지 못했습니다.",
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      showAxiosError("비콘-element 매핑 생성 중 오류", err);
+    }
+  }, [
+    schoolId,
+    currentFloorIndex,
+    floors,
+    selectedBeaconForMap,
+    selectedElementForMap,
+    authHeaders,
+    showAxiosError,
+    fetchBeaconElementMaps,
+    activeMapVersionId,
+    syncBeaconMappings,
+    logMonitoringMapAfterSync,
+  ]);
 
   const clampOffsetForScale = useCallback(
     (ox, oy, newScale) => {
@@ -2084,6 +2490,7 @@ export default function SchoolSetting() {
     },
     [imgNatural.w, imgNatural.h, clamp],
   );
+
   const setActiveMapToServer = useCallback(
     async (mapVersionId) => {
       if (!classroomId || !mapVersionId) {
@@ -2109,6 +2516,14 @@ export default function SchoolSetting() {
 
         setActiveMapVersionId(mapVersionId);
         localStorage.setItem("activeMapVersionId", mapVersionId);
+
+        await syncBeaconMappings(
+          mapVersionId,
+          selectedPlan?.label || "active-map-sync",
+        );
+
+        await logMonitoringMapAfterSync(mapVersionId);
+
         alert("✅ 활성 맵이 변경되었습니다.");
         await fetchMapVersions();
         await fetchActiveMap();
@@ -2123,6 +2538,9 @@ export default function SchoolSetting() {
       showAxiosError,
       fetchMapVersions,
       fetchActiveMap,
+      syncBeaconMappings,
+      logMonitoringMapAfterSync,
+      selectedPlan,
     ],
   );
   const fetchMapVersionDetail = useCallback(
@@ -2229,6 +2647,11 @@ export default function SchoolSetting() {
 
         if (!updated) return;
 
+        if (selectedPlanId === activeMapVersionId) {
+          await syncBeaconMappings(selectedPlanId, label);
+          await logMonitoringMapAfterSync(selectedPlanId);
+        }
+
         await fetchMapVersions();
         setSavePlanName("");
         setIsSavePlanModalOpen(false);
@@ -2287,7 +2710,10 @@ export default function SchoolSetting() {
     fetchMapVersions,
     setActiveMapToServer,
     selectedPlanId,
+    activeMapVersionId,
     updateMapVersionOnServer,
+    syncBeaconMappings,
+    logMonitoringMapAfterSync,
   ]);
 
   useEffect(() => {
@@ -3545,8 +3971,13 @@ export default function SchoolSetting() {
         });
       }
 
-      // ✅ 방 / 재난 구역 / 안전 구역: 타입 변경 + 이름 수정 + 리사이즈
-      if (["방", "재난 구역", "안전 구역"].includes(hit.el.type)) {
+      const hitType = normalizeElementType(
+        hit.el.type || hit.el.elementType || hit.el.zoneType,
+      );
+
+      if (
+        ["방", "FIRE_ZONE", "SAFE_ZONE", "RESTRICTED_ZONE"].includes(hitType)
+      ) {
         opts.push(
           {
             label: "방(파란색)으로 변경",
@@ -3554,7 +3985,14 @@ export default function SchoolSetting() {
               pushUndoSnapshot();
               setElements((prev) =>
                 prev.map((p) =>
-                  p.id === hit.el.id ? { ...p, type: "방" } : p,
+                  p.id === hit.el.id
+                    ? {
+                        ...p,
+                        type: "방",
+                        elementType: "방",
+                        zoneType: undefined,
+                      }
+                    : p,
                 ),
               );
               setContextMenu(null);
@@ -3566,7 +4004,14 @@ export default function SchoolSetting() {
               pushUndoSnapshot();
               setElements((prev) =>
                 prev.map((p) =>
-                  p.id === hit.el.id ? { ...p, type: "재난 구역" } : p,
+                  p.id === hit.el.id
+                    ? {
+                        ...p,
+                        type: "FIRE_ZONE",
+                        elementType: "FIRE_ZONE",
+                        zoneType: "FIRE_ZONE",
+                      }
+                    : p,
                 ),
               );
               setContextMenu(null);
@@ -3578,7 +4023,14 @@ export default function SchoolSetting() {
               pushUndoSnapshot();
               setElements((prev) =>
                 prev.map((p) =>
-                  p.id === hit.el.id ? { ...p, type: "안전 구역" } : p,
+                  p.id === hit.el.id
+                    ? {
+                        ...p,
+                        type: "SAFE_ZONE",
+                        elementType: "SAFE_ZONE",
+                        zoneType: "SAFE_ZONE",
+                      }
+                    : p,
                 ),
               );
               setContextMenu(null);
@@ -3805,8 +4257,15 @@ export default function SchoolSetting() {
 
   function renderResizeHandles(el) {
     if (!el) return null;
-    if (!["방", "제한 구역", "재난 구역", "안전 구역"].includes(el.type))
+    const normalized = normalizeElementType(
+      el.type || el.elementType || el.zoneType,
+    );
+
+    if (
+      !["방", "FIRE_ZONE", "SAFE_ZONE", "RESTRICTED_ZONE"].includes(normalized)
+    ) {
       return null;
+    }
     if (mode !== null) return null;
     if (editingResizeId !== el.id) return null;
 
@@ -4072,17 +4531,185 @@ export default function SchoolSetting() {
 
           {/* 도움말 */}
           {showHelp && (
-            <div className="p-4 rounded border bg-[#FAFAFA] text-sm text-gray-800 space-y-2">
-              <div className="font-bold text-[#2E7D32]">사용 방법(핵심)</div>
-              <ul className="list-disc pl-5 space-y-1">
-                <li>
-                  선택 모드(도구 선택 안함): 클릭=선택, Ctrl+클릭=다중 선택
-                </li>
-                <li>빈 공간 드래그=박스 선택</li>
-                <li>Space 누른 채 드래그=패닝</li>
-                <li>Ctrl+휠=줌</li>
-                <li>우클릭=삭제/문 회전 등</li>
-              </ul>
+            <div className="mt-4 rounded-2xl border border-gray-200 bg-white/95 shadow-sm overflow-hidden">
+              {/* 헤더 */}
+              <div className="px-6 py-4 border-b bg-green-50">
+                <h2 className="text-2xl font-bold text-green-800">
+                  구조도 설정 가이드
+                </h2>
+
+                <p className="text-sm text-gray-600 mt-1">
+                  구조도 기반 재난 시뮬레이션 공간을 설정합니다.
+                </p>
+              </div>
+
+              <div className="p-6 space-y-8">
+                {/* 설정 순서 */}
+                <section>
+                  <h3 className="text-lg font-bold mb-4 text-gray-800">
+                    🚀 추천 설정 순서
+                  </h3>
+
+                  <div className="flex flex-wrap gap-3">
+                    {[
+                      "자동 분석",
+                      "건물 윤곽",
+                      "방 설정",
+                      "문 설정",
+                      "비콘 등록",
+                      "제한구역",
+                    ].map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="px-4 py-2 rounded-xl bg-green-50 border border-green-200 text-green-800 font-medium text-sm"
+                      >
+                        {idx + 1}. {item}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                {/* 핵심 기능 */}
+                <section>
+                  <h3 className="text-lg font-bold mb-4 text-gray-800">
+                    🛠 주요 기능
+                  </h3>
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {/* 자동 분석 */}
+                    <div className="border rounded-xl p-4 bg-gray-50">
+                      <h4 className="font-bold text-green-700 mb-2">
+                        🤖 자동 분석
+                      </h4>
+
+                      <ul className="space-y-1 text-sm text-gray-700">
+                        <li>• 구조도 업로드 시 자동 실행</li>
+                        <li>• 방과 건물 윤곽 자동 인식</li>
+                        <li>• 잘못된 영역은 직접 수정 가능</li>
+                      </ul>
+                    </div>
+
+                    {/* 방 */}
+                    <div className="border rounded-xl p-4 bg-gray-50">
+                      <h4 className="font-bold text-green-700 mb-2">
+                        🏫 방 설정
+                      </h4>
+
+                      <ul className="space-y-1 text-sm text-gray-700">
+                        <li>• 드래그하여 방 영역 생성</li>
+                        <li>• 방 이름 입력 가능</li>
+                        <li>• 일반 / 재난 / 안전 구역 설정 가능</li>
+                      </ul>
+                    </div>
+
+                    {/* 문 */}
+                    <div className="border rounded-xl p-4 bg-gray-50">
+                      <h4 className="font-bold text-green-700 mb-2">
+                        🚪 문 설정
+                      </h4>
+
+                      <ul className="space-y-1 text-sm text-gray-700">
+                        <li>• 방과 복도 연결 설정</li>
+                        <li>• 클릭 후 방향 지정 가능</li>
+                        <li>• 이동 경로 계산에 사용됨</li>
+                      </ul>
+                    </div>
+
+                    {/* 비콘 */}
+                    <div className="border rounded-xl p-4 bg-gray-50">
+                      <h4 className="font-bold text-green-700 mb-2">
+                        📡 비콘 등록
+                      </h4>
+
+                      <ul className="space-y-1 text-sm text-gray-700">
+                        <li>• 학생 위치 추적 기준 장치</li>
+                        <li>• UUID / Major / Minor 입력</li>
+                        <li>• 모니터링 화면과 연동</li>
+                      </ul>
+                    </div>
+
+                    {/* 제한구역 */}
+                    <div className="border rounded-xl p-4 bg-gray-50">
+                      <h4 className="font-bold text-green-700 mb-2">
+                        ⚠ 제한구역
+                      </h4>
+
+                      <ul className="space-y-1 text-sm text-gray-700">
+                        <li>• 학생 접근 제한 영역 설정</li>
+                        <li>• 위험 지역 표시 가능</li>
+                      </ul>
+                    </div>
+
+                    {/* 건물 윤곽 */}
+                    <div className="border rounded-xl p-4 bg-gray-50">
+                      <h4 className="font-bold text-green-700 mb-2">
+                        🏢 건물 윤곽
+                      </h4>
+
+                      <ul className="space-y-1 text-sm text-gray-700">
+                        <li>• 건물 외곽선을 직접 설정</li>
+                        <li>• 꼭짓점을 순서대로 클릭</li>
+                      </ul>
+                    </div>
+                  </div>
+                </section>
+
+                {/* 층 관리 */}
+                <section>
+                  <h3 className="text-lg font-bold mb-4 text-gray-800">
+                    🏢 층 관리
+                  </h3>
+
+                  <div className="border rounded-xl p-4 bg-gray-50 text-sm text-gray-700 space-y-2">
+                    <p>• 좌우 버튼으로 층 이동 가능</p>
+                    <p>• 층 이름 수정 가능</p>
+                    <p>• 각 층은 별도로 저장 및 관리됨</p>
+                  </div>
+                </section>
+
+                {/* 단축키 */}
+                <section>
+                  <h3 className="text-lg font-bold mb-4 text-gray-800">
+                    ⌨ 단축키
+                  </h3>
+
+                  <div className="grid md:grid-cols-2 gap-3">
+                    {[
+                      ["Ctrl + 클릭", "다중 선택"],
+                      ["Ctrl + Z", "되돌리기"],
+                      ["Ctrl + Y", "다시 실행"],
+                      ["Ctrl + C", "복사"],
+                      ["Ctrl + V", "붙여넣기"],
+                      ["Backspace", "삭제"],
+                      ["ESC", "작업 취소"],
+                      ["Ctrl + 마우스 휠", "확대 / 축소"],
+                    ].map(([key, desc], idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between border rounded-lg px-4 py-3 bg-gray-50"
+                      >
+                        <span className="font-semibold text-green-700">
+                          {key}
+                        </span>
+
+                        <span className="text-sm text-gray-600">{desc}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                {/* 팁 */}
+                <section className="rounded-xl border border-yellow-300 bg-yellow-50 p-4">
+                  <h3 className="font-bold text-yellow-800 mb-2">📌 설정 팁</h3>
+
+                  <ul className="space-y-1 text-sm text-gray-700">
+                    <li>• 방 크기는 대략적으로 맞아도 충분합니다.</li>
+                    <li>• 자동 분석 결과는 수정 가능합니다.</li>
+                    <li>• 문은 연결 관계 표현이 가장 중요합니다.</li>
+                    <li>• 비콘은 실제 설치 위치와 최대한 맞춰주세요.</li>
+                  </ul>
+                </section>
+              </div>
             </div>
           )}
         </div>

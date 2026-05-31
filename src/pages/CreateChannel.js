@@ -2,7 +2,8 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import API_BASE from "../apiBase";
+
+const API_BASE = process.env.REACT_APP_API_BASE_URL;
 
 function CreateChannel() {
   const [schoolName, setSchoolName] = useState("");

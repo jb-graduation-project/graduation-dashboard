@@ -1,104 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Navbar from "../components/Navbar";
-import API_BASE from "../apiBase";
 
-const MOCK_MONITORING_DATA = {
-  classroomId: "test-room",
-  mapVersionId: "mock-map-version",
-  floors: [
-    {
-      floorIndex: 0,
-      floorLabel: "1층",
-      image: {
-        src: null,
-        naturalWidth: 1710,
-        naturalHeight: 423,
-      },
-      beaconMarkers: [
-        {
-          elementId: "beacon-1",
-          placementName: "1학년 1반",
-          zoneType: "방",
-          x: 300,
-          y: 160,
-          studentCount: 2,
-          students: [
-            {
-              studentId: "s1",
-              studentName: "학생A",
-              beaconState: "DETECTED",
-              lastRssi: -55,
-              lastSeenAt: new Date().toISOString(),
-            },
-            {
-              studentId: "s2",
-              studentName: "학생B",
-              beaconState: "DETECTED",
-              lastRssi: -61,
-              lastSeenAt: new Date().toISOString(),
-            },
-          ],
-        },
-        {
-          elementId: "beacon-2",
-          placementName: "복도",
-          zoneType: "제한 구역",
-          x: 850,
-          y: 210,
-          studentCount: 1,
-          students: [
-            {
-              studentId: "s3",
-              studentName: "학생C",
-              beaconState: "LOST",
-              lastRssi: -78,
-              lastSeenAt: new Date().toISOString(),
-            },
-          ],
-        },
-      ],
-    },
-  ],
-};
-
-function resolveImageUrl(src) {
-  if (!src) return "";
-
-  if (src.startsWith("http://") || src.startsWith("https://")) {
-    return src;
-  }
-
-  const baseUrl = API_BASE.replace(/\/$/, "");
-  const path = src.startsWith("/") ? src : `/${src}`;
-
-  return `${baseUrl}${path}`;
-}
-
-function formatTime(value) {
-  if (!value) return "-";
-  return String(value).replace("T", " ").slice(0, 19);
-}
-
-function getBeaconStateStyle(state) {
-  const normalized = String(state || "").toUpperCase();
-
-  if (normalized === "DETECTED") {
-    return "bg-green-100 text-green-700 border-green-200";
-  }
-
-  if (normalized === "LOST") {
-    return "bg-yellow-100 text-yellow-700 border-yellow-200";
-  }
-
-  return "bg-gray-100 text-gray-600 border-gray-200";
-}
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
 export default function Monitoring() {
-  const [data, setData] = useState(null);
-  const [selectedMarker, setSelectedMarker] = useState(null);
-  const [selectedFloorIndex, setSelectedFloorIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  // =========================
+  // 기본 값
+  // =========================
 
   const classroomId = useMemo(() => {
     return (
@@ -108,107 +16,172 @@ export default function Monitoring() {
     );
   }, []);
 
-  const activeMapVersionId = useMemo(() => {
-    return (
-      localStorage.getItem("activeMapVersionId") || data?.mapVersionId || ""
-    );
-  }, [data?.mapVersionId]);
-
   const authHeaders = useMemo(() => {
     const token = localStorage.getItem("token");
-    return token ? { Authorization: `Bearer ${token}` } : {};
+
+    return token
+      ? {
+          Authorization: `Bearer ${token}`,
+        }
+      : {};
   }, []);
 
-  const floors = useMemo(() => {
-    return Array.isArray(data?.floors) ? data.floors : [];
-  }, [data]);
+  // =========================
+  // 상태
+  // =========================
 
-  const currentFloor = useMemo(() => {
-    return floors[selectedFloorIndex] || floors[0] || null;
-  }, [floors, selectedFloorIndex]);
+  const [loading, setLoading] = useState(true);
 
-  const imageUrl = useMemo(() => {
-    return resolveImageUrl(currentFloor?.image?.src);
-  }, [currentFloor]);
+  const [error, setError] = useState("");
 
-  const naturalWidth = useMemo(() => {
-    return (
-      currentFloor?.image?.naturalWidth ||
-      currentFloor?.image?.natural?.w ||
-      currentFloor?.image?.natural?.width ||
-      1710
-    );
-  }, [currentFloor]);
+  const [monitoringData, setMonitoringData] = useState(null);
 
-  const naturalHeight = useMemo(() => {
-    return (
-      currentFloor?.image?.naturalHeight ||
-      currentFloor?.image?.natural?.h ||
-      currentFloor?.image?.natural?.height ||
-      423
-    );
-  }, [currentFloor]);
+  const [allStudents, setAllStudents] = useState([]);
 
-  const markers = useMemo(() => {
-    return Array.isArray(currentFloor?.beaconMarkers)
-      ? currentFloor.beaconMarkers
-      : [];
-  }, [currentFloor]);
+  const [selectedFloorIndex, setSelectedFloorIndex] = useState(0);
 
-  const allStudents = useMemo(() => {
-    return floors.flatMap((floor) =>
-      (floor.beaconMarkers || []).flatMap((marker) =>
-        (marker.students || []).map((student) => ({
-          ...student,
-          floorLabel: floor.floorLabel || `${floor.floorIndex ?? 0}층`,
-          placementName: marker.placementName,
-          zoneType: marker.zoneType,
-          markerX: marker.x,
-          markerY: marker.y,
-        })),
-      ),
-    );
-  }, [floors]);
+  const [selectedMarker, setSelectedMarker] = useState(null);
 
-  const totalStudentCount = useMemo(() => {
-    return markers.reduce(
-      (sum, marker) => sum + Number(marker.studentCount || 0),
-      0,
-    );
-  }, [markers]);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState("");
 
-  const dangerCount = useMemo(() => {
-    return markers
-      .filter((marker) =>
-        ["재난 구역", "제한 구역", "화재 구역"].includes(marker.zoneType),
-      )
-      .reduce((sum, marker) => sum + Number(marker.studentCount || 0), 0);
-  }, [markers]);
+  // =========================
+  // fallback mock
+  // =========================
 
-  const unityUrl = useMemo(() => {
-    const params = new URLSearchParams();
+  const MOCK_MONITORING_DATA = {
+    classroomId: classroomId || "mock-room",
+    mapVersionId: "mock-map",
+    floors: [],
+  };
 
-    if (classroomId) params.set("classroomId", classroomId);
-    if (activeMapVersionId)
-      params.set("activeMapVersionId", activeMapVersionId);
-    if (currentFloor?.floorIndex !== undefined) {
-      params.set("floorIndex", currentFloor.floorIndex);
+  // =========================
+  // 유틸
+  // =========================
+
+  const resolveImageUrl = useCallback((src) => {
+    if (!src) return "";
+
+    if (
+      src.startsWith("http://") ||
+      src.startsWith("https://") ||
+      src.startsWith("blob:") ||
+      src.startsWith("data:")
+    ) {
+      return src;
     }
 
-    return `/WebGL/index.html?${params.toString()}`;
-  }, [classroomId, activeMapVersionId, currentFloor?.floorIndex]);
+    const path = src.startsWith("/") ? src : `/${src}`;
 
-  const fetchActiveMapImageFloors = useCallback(async () => {
-    if (!classroomId) return null;
+    return `${API_BASE_URL}${path}`;
+  }, []);
 
-    const response = await fetch(`${API_BASE}/api/rooms/${classroomId}/map`, {
-      headers: {
-        ...authHeaders,
+  const formatTime = (value) => {
+    if (!value) return "-";
+
+    return value.replace("T", " ").slice(0, 19);
+  };
+
+  const getStudentDetectState = (student) => {
+    if (student.isKicked) return "KICKED";
+
+    if (student.beaconState) return student.beaconState;
+
+    if (student.beaconId || student.lastSeenAt) return "DETECTED";
+
+    return "LOST";
+  };
+
+  const getSignalText = (rssi) => {
+    if (rssi === null || rssi === undefined) {
+      return "미감지";
+    }
+
+    if (rssi >= -60) {
+      return "강함";
+    }
+
+    if (rssi >= -75) {
+      return "양호";
+    }
+
+    return "약함";
+  };
+
+  const getMarkerZoneId = (marker) => {
+    return (
+      marker?.zoneElementId ||
+      marker?.elementId ||
+      marker?.beaconElementId ||
+      marker?.beaconId
+    );
+  };
+
+  // =========================
+  // monitoring-map API
+  // =========================
+
+  const fetchMonitoringMap = useCallback(async () => {
+    if (!classroomId) {
+      throw new Error("classroomId가 없습니다.");
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/rooms/${classroomId}/monitoring-map`,
+      {
+        headers: {
+          ...authHeaders,
+        },
       },
-    });
+    );
 
     if (!response.ok) {
-      throw new Error(`활성 구조도 API 호출 실패: ${response.status}`);
+      throw new Error(`monitoring-map 실패 (${response.status})`);
+    }
+
+    return response.json();
+  }, [classroomId, authHeaders]);
+
+  // =========================
+  // 학생 API
+  // =========================
+
+  const fetchStudents = useCallback(async () => {
+    if (!classroomId) return [];
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/rooms/${classroomId}/students`,
+      {
+        headers: {
+          ...authHeaders,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`students 실패 (${response.status})`);
+    }
+
+    return response.json();
+  }, [classroomId, authHeaders]);
+
+  // =========================
+  // 구조도 API
+  // =========================
+
+  const fetchMapData = useCallback(async () => {
+    if (!classroomId) return null;
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/rooms/${classroomId}/map`,
+      {
+        headers: {
+          ...authHeaders,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`map API 실패 (${response.status})`);
     }
 
     const mapData = await response.json();
@@ -216,7 +189,6 @@ export default function Monitoring() {
     if (!mapData?.floorsJson) return null;
 
     const parsedFloors = JSON.parse(mapData.floorsJson);
-    if (!Array.isArray(parsedFloors)) return null;
 
     return {
       mapVersionId: mapData.mapVersionId,
@@ -224,412 +196,927 @@ export default function Monitoring() {
     };
   }, [classroomId, authHeaders]);
 
-  const fetchMonitoringMap = useCallback(async () => {
+  // =========================
+  // 데이터 로드
+  // =========================
+
+  const fetchAllData = useCallback(async () => {
     try {
+      // setLoading(true);
+
       setError("");
 
-      if (!classroomId) {
-        throw new Error("classroomId가 없습니다.");
-      }
+      const [monitoringResult, studentsResult, mapResult] =
+        await Promise.allSettled([
+          fetchMonitoringMap(),
+          fetchStudents(),
+          fetchMapData(),
+        ]);
 
-      const [monitoringResult, activeMapResult] = await Promise.allSettled([
-        fetch(`${API_BASE}/api/rooms/${classroomId}/monitoring-map`, {
-          headers: {
-            ...authHeaders,
-          },
-        }),
-        fetchActiveMapImageFloors(),
-      ]);
+      // =========================
+      // monitoring-map
+      // =========================
 
-      let monitoringData = null;
+      let monitoring = MOCK_MONITORING_DATA;
 
-      if (
-        monitoringResult.status === "fulfilled" &&
-        monitoringResult.value.ok
-      ) {
-        monitoringData = await monitoringResult.value.json();
+      if (monitoringResult.status === "fulfilled") {
+        monitoring = monitoringResult.value;
       } else {
-        console.warn("monitoring-map 실패 → 더미 데이터 사용");
-        monitoringData = MOCK_MONITORING_DATA;
+        console.warn("monitoring-map 실패 → fallback 사용");
       }
 
-      let activeMapData = null;
+      // =========================
+      // 구조도 merge
+      // =========================
 
-      if (activeMapResult.status === "fulfilled") {
-        activeMapData = activeMapResult.value;
-      }
+      if (mapResult.status === "fulfilled" && mapResult.value) {
+        const mapData = mapResult.value;
 
-      if (activeMapData?.floors?.length > 0) {
-        const mergedFloors = monitoringData.floors.map((floor, index) => {
+        const mergedFloors = (monitoring.floors || []).map((floor, index) => {
           const mapFloor =
-            activeMapData.floors.find(
+            mapData.floors.find(
               (f) =>
-                Number(f.floorIndex ?? f.floor ?? index) ===
+                Number(f.floorIndex ?? index) ===
                 Number(floor.floorIndex ?? index),
-            ) || activeMapData.floors[index];
+            ) || mapData.floors[index];
 
           return {
             ...floor,
+
+            floorIndex:
+              floor.floorIndex ??
+              mapFloor?.floorIndex ??
+              mapFloor?.floor ??
+              index,
+
             floorLabel:
               floor.floorLabel ||
               mapFloor?.floorLabel ||
               mapFloor?.name ||
               `${index + 1}층`,
+
+            elements:
+              Array.isArray(mapFloor?.elements) && mapFloor.elements.length > 0
+                ? mapFloor.elements
+                : Array.isArray(floor.elements)
+                  ? floor.elements
+                  : [],
+
             image: {
               ...floor.image,
+
               src:
-                floor.image?.src ||
                 mapFloor?.image?.src ||
                 mapFloor?.imageSrc ||
+                floor.image?.src ||
                 null,
+
               naturalWidth:
                 floor.image?.naturalWidth ||
                 mapFloor?.image?.natural?.w ||
                 mapFloor?.image?.naturalWidth ||
                 1710,
+
               naturalHeight:
                 floor.image?.naturalHeight ||
                 mapFloor?.image?.natural?.h ||
                 mapFloor?.image?.naturalHeight ||
                 423,
-              natural: floor.image?.natural || mapFloor?.image?.natural || null,
             },
           };
         });
 
-        monitoringData = {
-          ...monitoringData,
-          mapVersionId:
-            monitoringData.mapVersionId ||
-            activeMapData.mapVersionId ||
-            activeMapVersionId,
+        monitoring = {
+          ...monitoring,
+          mapVersionId: monitoring.mapVersionId || mapData.mapVersionId,
+
           floors: mergedFloors,
         };
       }
 
-      setData(monitoringData);
+      // =========================
+      // 학생
+      // =========================
+
+      let students = [];
+
+      if (studentsResult.status === "fulfilled") {
+        students = Array.isArray(studentsResult.value)
+          ? studentsResult.value
+          : [];
+      }
+
+      setMonitoringData(monitoring);
+
+      setAllStudents(students);
+
+      setLastUpdatedAt(new Date().toLocaleTimeString());
     } catch (err) {
-      console.warn("모니터링 전체 실패 → 임시 데이터 사용:", err);
-      setData(MOCK_MONITORING_DATA);
-      setError("");
-    } finally {
-      setLoading(false);
+      console.error(err);
+
+      setError(err.message);
     }
-  }, [classroomId, authHeaders, activeMapVersionId, fetchActiveMapImageFloors]);
+  }, [fetchMonitoringMap, fetchStudents, fetchMapData]);
+
+  // =========================
+  // 초기 로드
+  // =========================
 
   useEffect(() => {
-    fetchMonitoringMap();
+    const init = async () => {
+      await fetchAllData();
 
-    // 백엔드 준비 후 실시간 갱신 사용
-    // const timer = setInterval(fetchMonitoringMap, 2000);
-    // return () => clearInterval(timer);
-  }, [fetchMonitoringMap]);
+      setLoading(false);
+    };
+
+    init();
+
+    const timer = setInterval(() => {
+      fetchAllData();
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, [fetchAllData]);
+
+  // =========================
+  // floor
+  // =========================
+
+  const floors = useMemo(() => {
+    const rawFloors = monitoringData?.floors || [];
+
+    return rawFloors.filter((floor, index, self) => {
+      const label = floor.floorLabel || floor.name || `${index + 1}층`;
+
+      return (
+        index ===
+        self.findIndex((f) => {
+          const compareLabel = f.floorLabel || f.name;
+
+          return compareLabel === label;
+        })
+      );
+    });
+  }, [monitoringData]);
+
+  const selectedFloor = useMemo(() => {
+    if (!floors.length) return null;
+
+    return floors[selectedFloorIndex] || floors[0];
+  }, [floors, selectedFloorIndex]);
+
+  // =========================
+  // image
+  // =========================
+
+  const imageUrl = useMemo(() => {
+    const src = selectedFloor?.image?.src || selectedFloor?.imageSrc || "";
+
+    return resolveImageUrl(src);
+  }, [selectedFloor, resolveImageUrl]);
+
+  const imageNaturalSize = useMemo(() => {
+    const image = selectedFloor?.image || {};
+
+    const width =
+      Number(image.naturalWidth) ||
+      Number(image.width) ||
+      Number(image.natural?.w) ||
+      Number(selectedFloor?.naturalWidth) ||
+      1710;
+
+    const height =
+      Number(image.naturalHeight) ||
+      Number(image.height) ||
+      Number(image.natural?.h) ||
+      Number(selectedFloor?.naturalHeight) ||
+      423;
+
+    return {
+      width,
+      height,
+    };
+  }, [selectedFloor]);
+
+  const toPercentX = useCallback(
+    (x) => `${(Number(x || 0) / imageNaturalSize.width) * 100}%`,
+    [imageNaturalSize.width],
+  );
+
+  const toPercentY = useCallback(
+    (y) => `${(Number(y || 0) / imageNaturalSize.height) * 100}%`,
+    [imageNaturalSize.height],
+  );
+
+  const toPercentWidth = useCallback(
+    (width) => `${(Number(width || 0) / imageNaturalSize.width) * 100}%`,
+    [imageNaturalSize.width],
+  );
+
+  const toPercentHeight = useCallback(
+    (height) => `${(Number(height || 0) / imageNaturalSize.height) * 100}%`,
+    [imageNaturalSize.height],
+  );
+
+  // =========================
+  // marker
+  // =========================
+
+  const markers = Array.isArray(selectedFloor?.beaconMarkers)
+    ? selectedFloor.beaconMarkers.filter((marker) => marker.isActive !== false)
+    : [];
+
+  // 구조도에 저장된 실제 비콘 설치 위치
+  const beaconElements = (selectedFloor?.elements || []).filter((el) => {
+    const type = String(el.elementType || el.type || "").toUpperCase();
+
+    return type === "BEACON" || el.type === "비콘";
+  });
+
+  const getMarkerPosition = (marker) => {
+    // 1. 비콘과 연결된 구역 ID
+    const zoneId = marker?.zoneElementId || marker?.elementId;
+
+    // 2. 연결된 구역 찾기
+    const matchedZone = (selectedFloor?.elements || []).find((element) => {
+      return String(element?.id || "") === String(zoneId || "");
+    });
+
+    // 3. 구역이 있으면 구역 중앙에 마커 표시
+    if (matchedZone) {
+      return {
+        x: Number(matchedZone.x || 0) + Number(matchedZone.width || 0) / 2,
+        y: Number(matchedZone.y || 0) + Number(matchedZone.height || 0) / 2,
+      };
+    }
+
+    // 4. 구역 연결이 없으면 실제 비콘 설치 위치 사용
+    const matchedBeacon = beaconElements.find((element) => {
+      const elementBeaconId = String(
+        element.serverBeaconId || element.beaconId || "",
+      );
+
+      const markerBeaconId = String(marker?.beaconId || "");
+
+      return (
+        elementBeaconId && markerBeaconId && elementBeaconId === markerBeaconId
+      );
+    });
+
+    if (matchedBeacon) {
+      return {
+        x: Number(matchedBeacon.x || 0),
+        y: Number(matchedBeacon.y || 0),
+      };
+    }
+
+    // 5. 마지막 fallback
+    return {
+      x: Number(marker?.x || 0),
+      y: Number(marker?.y || 0),
+    };
+  };
+
+  const getStudentLocationName = useCallback(
+    (student) => {
+      if (!student) return "미감지";
+
+      const studentBeaconId = String(student.beaconId || "");
+      const studentId = String(student.studentId || "");
+
+      // 전체 층을 순회하면서 학생이 감지된 비콘 찾기
+      for (const floor of floors) {
+        const floorMarkers = Array.isArray(floor?.beaconMarkers)
+          ? floor.beaconMarkers
+          : [];
+
+        const matchedMarker = floorMarkers.find((marker) => {
+          const markerBeaconId = String(marker?.beaconId || "");
+
+          const matchedByBeaconId =
+            studentBeaconId &&
+            markerBeaconId &&
+            studentBeaconId === markerBeaconId;
+
+          const matchedByStudentId = Array.isArray(marker?.students)
+            ? marker.students.some(
+                (item) => String(item?.studentId || "") === studentId,
+              )
+            : false;
+
+          return matchedByBeaconId || matchedByStudentId;
+        });
+
+        if (!matchedMarker) continue;
+
+        const zoneId =
+          matchedMarker.zoneElementId ||
+          matchedMarker.elementId ||
+          matchedMarker.beaconElementId;
+
+        const matchedZone = (floor?.elements || []).find(
+          (element) => String(element?.id || "") === String(zoneId || ""),
+        );
+
+        if (matchedZone?.name) {
+          return matchedZone.name;
+        }
+
+        return "매핑 갱신 필요";
+      }
+
+      return "미감지";
+    },
+    [floors],
+  );
+
+  // =========================
+  // zone
+  // =========================
+
+  const normalizeZoneType = (type) => {
+    const raw = String(type ?? "").trim();
+    const compact = raw.replace(/\s+/g, "");
+    const upper = raw.toUpperCase();
+
+    if (
+      upper === "FIRE_ZONE" ||
+      upper === "DANGER_ZONE" ||
+      upper === "DISASTER_ZONE" ||
+      compact === "재난구역" ||
+      compact === "화재구역"
+    ) {
+      return "FIRE_ZONE";
+    }
+
+    if (
+      upper === "SAFE_ZONE" ||
+      compact === "안전구역" ||
+      compact === "대피구역"
+    ) {
+      return "SAFE_ZONE";
+    }
+
+    if (
+      upper === "RESTRICTED_ZONE" ||
+      compact === "제한구역" ||
+      compact === "출입제한"
+    ) {
+      return "RESTRICTED_ZONE";
+    }
+
+    return "";
+  };
+
+  const zoneElements = (selectedFloor?.elements || []).filter((e) =>
+    ["FIRE_ZONE", "SAFE_ZONE", "RESTRICTED_ZONE"].includes(
+      normalizeZoneType(e.zoneType || e.elementType || e.type),
+    ),
+  );
+
+  // =========================
+  // stats
+  // =========================
+
+  // 퇴출된 학생인지 확인
+  const isKickedStudent = useCallback((student) => {
+    if (!student) return false;
+
+    const status = String(student.status || "")
+      .trim()
+      .toUpperCase();
+    const beaconState = String(student.beaconState || "")
+      .trim()
+      .toUpperCase();
+
+    return (
+      student.isKicked === true ||
+      status === "KICKED" ||
+      beaconState === "KICKED"
+    );
+  }, []);
+
+  // 화면에 표시할 학생: 퇴출 학생 제외
+  const visibleStudents = useMemo(() => {
+    return allStudents.filter((student) => !isKickedStudent(student));
+  }, [allStudents, isKickedStudent]);
+
+  const totalStudentCount = visibleStudents.length;
+
+  const dangerCount = visibleStudents.filter((student) =>
+    ["RESTRICTED"].includes(String(student.status || "").toUpperCase()),
+  ).length;
+
+  // =========================
+  // unity url
+  // =========================
+
+  const unityUrl = useMemo(() => {
+    const params = new URLSearchParams();
+
+    if (monitoringData?.classroomId) {
+      params.set("classroomId", monitoringData.classroomId);
+    }
+
+    if (monitoringData?.mapVersionId) {
+      params.set("activeMapVersionId", monitoringData.mapVersionId);
+    }
+
+    if (selectedFloor?.floorIndex !== undefined) {
+      params.set("floorIndex", selectedFloor.floorIndex);
+    }
+
+    return `/WebGL/index.html?${params.toString()}`;
+  }, [monitoringData, selectedFloor]);
+
+  const findZoneElementByMarker = (marker) => {
+    const zoneId = marker?.zoneElementId || marker?.elementId;
+
+    if (!zoneId) return null;
+
+    return (selectedFloor?.elements || []).find((el) => {
+      return String(el.id) === String(zoneId);
+    });
+  };
+
+  const getMarkerDisplayName = (marker) => {
+    const zoneElement = findZoneElementByMarker(marker);
+
+    // 현재 활성 구조도에서 연결된 구역을 찾은 경우에만 방 이름 표시
+    if (zoneElement?.name) {
+      return zoneElement.name;
+    }
+
+    // 과거 placementName을 그대로 보여주지 않음
+    return "매핑 갱신 필요";
+  };
+
+  // =========================
+  // marker click
+  // =========================
 
   const handleSelectMarker = (marker) => {
+    const zoneId = getMarkerZoneId(marker);
+
+    // 2D 표시용 비콘 위치
+    const beaconPosition = getMarkerPosition(marker);
+
+    // Unity 이동용 구역 위치
+    const zoneElement = findZoneElementByMarker(marker);
+
+    console.log("[Monitoring] 선택 비콘 =", marker);
+    console.log("[Monitoring] 연결 구역 ID =", zoneId);
+    console.log("[Monitoring] 연결 구역 =", zoneElement);
+    console.log("[Monitoring] 표시 좌표 =", beaconPosition);
+
+    const targetX = zoneElement?.x ?? marker.x ?? beaconPosition.x;
+    const targetY = zoneElement?.y ?? marker.y ?? beaconPosition.y;
+    const targetWidth = zoneElement?.width ?? marker.width ?? 0;
+    const targetHeight = zoneElement?.height ?? marker.height ?? 0;
+
     setSelectedMarker(marker);
 
     const iframe = document.getElementById("unity-monitoring-frame");
+
     iframe?.contentWindow?.postMessage(
       {
         type: "SELECT_BEACON_ZONE",
+
         payload: {
-          elementId: marker.elementId,
-          placementName: marker.placementName,
-          x: marker.x,
-          y: marker.y,
-          studentCount: marker.studentCount,
+          elementId: marker.zoneElementId || marker.elementId || zoneId,
+          zoneElementId: marker.zoneElementId || marker.elementId,
+          beaconElementId: marker.beaconElementId || null,
+          beaconId: marker.beaconId,
+
+          placementName:
+            zoneElement?.name || marker.placementName || "선택 구역",
+
+          // Unity 이동은 비콘 좌표가 아니라 구역 좌표 기준
+          x: targetX,
+          y: targetY,
+          width: targetWidth,
+          height: targetHeight,
+
+          // 참고용: 실제 비콘 위치도 같이 보냄
+          beaconX: beaconPosition.x,
+          beaconY: beaconPosition.y,
+
+          studentCount: marker.studentCount ?? 0,
           students: marker.students || [],
+
+          thresholdRssi: marker.thresholdRssi,
+
+          zoneType: normalizeZoneType(
+            marker.zoneType ||
+              zoneElement?.zoneType ||
+              zoneElement?.elementType ||
+              zoneElement?.type,
+          ),
         },
       },
       "*",
     );
   };
 
+  // =========================
+  // loading
+  // =========================
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f7f8fa]">
+        <div className="rounded-xl border border-gray-200 bg-white px-6 py-5 shadow-sm">
+          모니터링 데이터 불러오는 중...
+        </div>
+      </div>
+    );
+  }
+
+  // =========================
+  // render
+  // =========================
+
   return (
-    <div className="min-h-screen bg-[#f7f8fa] flex flex-col">
+    <div className="flex flex-col w-full min-h-screen bg-[#F9FBE7]">
       <Navbar />
 
-      <main className="p-6 lg:p-8 space-y-6">
-        <section className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+      <div className="flex-1 overflow-auto px-8 pb-8 pt-3 bg-[#F9FBE7] space-y-5">
+        {/* header */}
+
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-3xl font-bold text-[#2E7D32]">
+            <h2 className="text-3xl font-bold text-[#2E7D32] mb-2">
               실시간 통합 모니터링
             </h2>
+
+            <p className="text-sm text-gray-600">
+              마지막 갱신 :{lastUpdatedAt}
+            </p>
           </div>
 
           <button
             type="button"
-            onClick={fetchMonitoringMap}
-            className="self-start rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+            onClick={fetchAllData}
+            className="rounded-xl bg-[#66BB6A] px-5 py-2 text-sm font-semibold text-white shadow-md transition hover:bg-[#2E7D32]"
           >
             새로고침
           </button>
-        </section>
+        </div>
+
+        {/* error */}
 
         {error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
             {error}
           </div>
         )}
 
-        {loading && (
-          <div className="rounded-xl border border-gray-200 bg-white p-5 text-gray-500">
-            모니터링 데이터를 불러오는 중입니다.
+        {/* summary */}
+
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="rounded-2xl border border-[#C8E6C9] bg-white p-5 shadow-md">
+            <p className="text-sm text-gray-500">전체 학생 수</p>
+
+            <p className="mt-2 text-4xl font-bold text-[#2E7D32]">
+              {totalStudentCount}
+            </p>
           </div>
-        )}
 
-        {!loading && !error && !currentFloor && (
-          <div className="rounded-xl border border-gray-200 bg-white p-5 text-gray-500">
-            연결된 구조도 데이터가 없습니다.
+          <div className="rounded-2xl border border-[#C8E6C9] bg-white p-5 shadow-md">
+            <p className="text-sm text-gray-500">위험 구역 학생 수</p>
+
+            <p className="mt-2 text-4xl font-bold text-[#C62828]">
+              {dangerCount}
+            </p>
           </div>
-        )}
 
-        {!loading && currentFloor && (
-          <>
-            <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-                <p className="text-sm text-gray-500">현재 층 학생 수</p>
-                <p className="mt-2 text-3xl font-bold text-[#2E7D32]">
-                  {totalStudentCount}
-                </p>
-              </div>
+          <div className="rounded-2xl border border-[#C8E6C9] bg-white p-5 shadow-md">
+            <p className="text-sm text-gray-500">현재 층 활성 비콘 수</p>
 
-              <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-                <p className="text-sm text-gray-500">위험/제한 구역 학생 수</p>
-                <p className="mt-2 text-3xl font-bold text-red-600">
-                  {dangerCount}
-                </p>
-              </div>
+            <p className="mt-2 text-4xl font-bold text-[#1976D2]">
+              {markers.length}
+            </p>
+          </div>
+        </section>
 
-              <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-                <p className="text-sm text-gray-500">전체 감지 학생 수</p>
-                <p className="mt-2 text-3xl font-bold text-gray-800">
-                  {allStudents.length}
-                </p>
-              </div>
-            </section>
+        {/* floor tabs */}
 
-            {floors.length > 1 && (
-              <section className="flex flex-wrap gap-2">
-                {floors.map((floor, index) => (
-                  <button
-                    key={`${floor.floorIndex}-${index}`}
-                    type="button"
-                    onClick={() => {
-                      setSelectedFloorIndex(index);
-                      setSelectedMarker(null);
+        <div className="flex flex-wrap gap-2">
+          {floors.map((floor, index) => {
+            const isActive = index === selectedFloorIndex;
+
+            return (
+              <button
+                key={floor.floorIndex ?? index}
+                type="button"
+                onClick={() => {
+                  setSelectedFloorIndex(index);
+                  setSelectedMarker(null);
+                }}
+                className={`rounded-full px-4 py-2 text-sm font-medium border transition ${
+                  isActive
+                    ? "bg-[#66BB6A] text-white border-[#66BB6A] shadow-sm"
+                    : "bg-white text-[#2E7D32] border-[#A5D6A7] hover:bg-[#F1F8E9]"
+                }`}
+              >
+                {floor.floorLabel || floor.name || `${index + 1}층`}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* main */}
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          {/* 2D */}
+
+          <section className="rounded-2xl border border-[#C8E6C9] bg-white p-6 shadow-md">
+            <div className="mb-4">
+              <h3 className="text-xl font-bold text-[#2E7D32]">
+                2D 구조도 모니터링
+              </h3>
+
+              <p className="mt-1 text-sm text-gray-500">
+                비콘 클릭 시 학생 상세 정보 확인 가능
+              </p>
+            </div>
+
+            <div className="w-full overflow-auto rounded-lg border border-gray-200 bg-[#F1F8E9]">
+              <div
+                className="relative mx-auto"
+                style={{
+                  width: "100%",
+                  maxWidth: "100%",
+                  aspectRatio: `${imageNaturalSize.width} / ${imageNaturalSize.height}`,
+                }}
+              >
+                {imageUrl ? (
+                  <img
+                    src={imageUrl}
+                    alt="구조도"
+                    className="absolute inset-0 h-full w-full select-none"
+                    style={{
+                      objectFit: "fill",
                     }}
-                    className={`rounded-full px-4 py-2 text-sm font-medium border ${
-                      selectedFloorIndex === index
-                        ? "bg-[#2E7D32] text-white border-[#2E7D32]"
-                        : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-                    }`}
-                  >
-                    {floor.floorLabel || `${floor.floorIndex ?? index}층`}
-                  </button>
-                ))}
-              </section>
-            )}
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center text-gray-400">
+                    구조도 이미지 없음
+                  </div>
+                )}
 
-            <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-              <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-                <div className="mb-4 flex items-center justify-between gap-3">
+                {zoneElements.map((element) => {
+                  const zoneType = normalizeZoneType(
+                    element.zoneType || element.elementType || element.type,
+                  );
+
+                  const left = toPercentX(element.x);
+                  const top = toPercentY(element.y);
+                  const width = toPercentWidth(element.width);
+                  const height = toPercentHeight(element.height);
+
+                  return (
+                    <div
+                      key={element.id}
+                      className={`absolute rounded-lg border-2 ${
+                        zoneType === "SAFE_ZONE"
+                          ? "border-green-600 bg-green-500/20"
+                          : ""
+                      } ${
+                        zoneType === "FIRE_ZONE"
+                          ? "border-red-600 bg-red-500/20"
+                          : ""
+                      } ${
+                        zoneType === "RESTRICTED_ZONE"
+                          ? "border-yellow-500 bg-yellow-400/20"
+                          : ""
+                      }`}
+                      style={{
+                        left,
+                        top,
+                        width,
+                        height,
+                      }}
+                      title={`${zoneType} / ${element.name || element.id}`}
+                    />
+                  );
+                })}
+
+                {/* markers */}
+                {/* markers */}
+                {markers.map((marker) => {
+                  const position = getMarkerPosition(marker);
+
+                  const left = toPercentX(position.x);
+                  const top = toPercentY(position.y);
+
+                  const markerZoneId = getMarkerZoneId(marker);
+                  const selectedMarkerZoneId = getMarkerZoneId(selectedMarker);
+
+                  const selected = selectedMarkerZoneId === markerZoneId;
+
+                  return (
+                    <button
+                      key={markerZoneId}
+                      type="button"
+                      onClick={() => handleSelectMarker(marker)}
+                      className={`absolute flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white text-sm font-bold text-white shadow-lg transition ${
+                        selected
+                          ? "bg-green-600 ring-4 ring-green-200"
+                          : "bg-blue-500 hover:brightness-110"
+                      }`}
+                      style={{
+                        left,
+                        top,
+                      }}
+                      title={`${getMarkerDisplayName(marker)} / 감지 학생 ${
+                        marker.studentCount ?? 0
+                      }명`}
+                    >
+                      {marker.studentCount ?? 0}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* selected students */}
+
+            <div className="mt-4 rounded-2xl border border-[#DCEDC8] bg-[#F1F8E9] p-4">
+              {!selectedMarker ? (
+                <p className="text-sm text-gray-500">비콘을 선택하세요.</p>
+              ) : (
+                <div className="space-y-3">
                   <div>
-                    <h3 className="text-xl font-bold text-[#2E7D32]">
-                      2D 모니터링 공간
-                    </h3>
-                    <p className="mt-1 text-sm text-gray-500">
-                      숫자를 클릭하면 해당 구역과 학생 상태를 확인할 수
-                      있습니다.
+                    <p className="font-bold text-gray-800">
+                      {getMarkerDisplayName(selectedMarker)}
+                    </p>
+
+                    <p className="text-sm text-gray-500">
+                      {selectedMarker.zoneType}
+                    </p>
+
+                    <p className="text-xs text-gray-500">
+                      현재 감지 학생: {selectedMarker.studentCount ?? 0}명
                     </p>
                   </div>
 
-                  <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700">
-                    {currentFloor.floorLabel ||
-                      `${currentFloor.floorIndex ?? 0}층`}
-                  </span>
-                </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {(selectedMarker.students || [])
+                      .filter((student) => !isKickedStudent(student))
+                      .map((student) => {
+                        const state = getStudentDetectState(student);
 
-                <div
-                  className="relative w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-100"
-                  style={{
-                    aspectRatio: `${naturalWidth} / ${naturalHeight}`,
-                  }}
-                >
-                  {imageUrl ? (
-                    <img
-                      src={imageUrl}
-                      alt="구조도"
-                      draggable={false}
-                      className="absolute inset-0 h-full w-full select-none object-contain"
-                    />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-                      구조도 이미지가 없습니다.
-                    </div>
-                  )}
-
-                  {markers.map((marker) => {
-                    const left = `${(Number(marker.x || 0) / naturalWidth) * 100}%`;
-                    const top = `${(Number(marker.y || 0) / naturalHeight) * 100}%`;
-                    const selected =
-                      selectedMarker?.elementId === marker.elementId;
-
-                    return (
-                      <button
-                        key={marker.elementId}
-                        type="button"
-                        onClick={() => handleSelectMarker(marker)}
-                        title={marker.placementName}
-                        className={`absolute flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white text-sm font-bold text-white shadow-lg transition ${
-                          selected
-                            ? "bg-green-600 ring-4 ring-green-200"
-                            : "bg-blue-500 hover:brightness-110"
-                        }`}
-                        style={{ left, top }}
-                      >
-                        {marker.studentCount || 0}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="mt-4 rounded-lg bg-gray-50 p-4">
-                  {!selectedMarker ? (
-                    <p className="text-sm text-gray-500">
-                      비콘 마커를 선택하면 구역 상세 정보가 표시됩니다.
-                    </p>
-                  ) : (
-                    <div>
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="font-bold text-gray-800">
-                            {selectedMarker.placementName}
-                          </p>
-                          <p className="mt-1 text-sm text-gray-500">
-                            {selectedMarker.zoneType || "구역 정보 없음"}
-                          </p>
-                        </div>
-
-                        <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700">
-                          {selectedMarker.studentCount || 0}명
-                        </span>
-                      </div>
-
-                      <div className="mt-3 space-y-2">
-                        {selectedMarker.students?.length > 0 ? (
-                          selectedMarker.students.map((student) => (
-                            <div
-                              key={student.studentId}
-                              className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2"
-                            >
+                        return (
+                          <div
+                            key={student.studentId}
+                            className="rounded-xl border border-[#C8E6C9] bg-white p-4 shadow-sm"
+                          >
+                            <div className="flex items-start justify-between gap-2">
                               <div>
-                                <p className="text-sm font-bold text-gray-800">
-                                  {student.studentName || "이름 없음"}
+                                <p className="font-semibold text-gray-800">
+                                  {student.studentName}
                                 </p>
+
+                                <p className="mt-1 text-xs text-gray-500">
+                                  신호 :{getSignalText(student.lastRssi)}
+                                </p>
+
                                 <p className="text-xs text-gray-500">
-                                  RSSI: {student.lastRssi ?? "-"} / 마지막 감지:{" "}
-                                  {formatTime(student.lastSeenAt)}
+                                  마지막 감지 :{formatTime(student.lastSeenAt)}
                                 </p>
                               </div>
 
                               <span
-                                className={`rounded-full border px-2 py-1 text-xs font-medium ${getBeaconStateStyle(
-                                  student.beaconState,
-                                )}`}
+                                className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                                  state === "DETECTED"
+                                    ? "bg-[#E8F5E9] text-[#2E7D32]"
+                                    : state === "LOST"
+                                      ? "bg-[#FFEBEE] text-[#C62828]"
+                                      : "bg-gray-100 text-gray-700"
+                                }`}
                               >
-                                {student.beaconState || "-"}
+                                {state}
                               </span>
                             </div>
-                          ))
-                        ) : (
-                          <p className="text-sm text-gray-500">
-                            현재 이 구역에 감지된 학생이 없습니다.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-                <div className="mb-4">
-                  <h3 className="text-xl font-bold text-[#2E7D32]">
-                    3D 모니터링 공간
-                  </h3>
-                </div>
-
-                <div className="w-full aspect-video overflow-hidden rounded-lg border border-gray-200 bg-[#f3f4f6]">
-                  <iframe
-                    id="unity-monitoring-frame"
-                    key={unityUrl}
-                    src={unityUrl}
-                    width="100%"
-                    height="100%"
-                    title="Unity WebGL Monitoring"
-                    style={{
-                      border: "none",
-                      display: "block",
-                      width: "100%",
-                      height: "100%",
-                    }}
-                  />
-                </div>
-              </div>
-            </section>
-
-            <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h3 className="text-xl font-bold text-[#2E7D32]">
-                  전체 학생 현황
-                </h3>
-                <span className="text-sm text-gray-500">
-                  총 {allStudents.length}명
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {allStudents.length > 0 ? (
-                  allStudents.map((student) => (
-                    <div
-                      key={`${student.studentId}-${student.placementName}`}
-                      className="rounded-lg border border-gray-200 p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-bold text-gray-800">
-                            {student.studentName || "이름 없음"}
-                          </p>
-                          <p className="mt-1 text-sm text-gray-500">
-                            위치: {student.floorLabel} /{" "}
-                            {student.placementName || "-"}
-                          </p>
-                          <p className="mt-1 text-sm text-gray-500">
-                            RSSI: {student.lastRssi ?? "-"}
-                          </p>
-                        </div>
-
-                        <span
-                          className={`rounded-full border px-2 py-1 text-xs font-medium ${getBeaconStateStyle(
-                            student.beaconState,
-                          )}`}
-                        >
-                          {student.beaconState || "-"}
-                        </span>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-lg bg-gray-50 p-4 text-sm text-gray-500">
-                    현재 감지된 학생이 없습니다.
+                          </div>
+                        );
+                      })}
                   </div>
-                )}
-              </div>
-            </section>
-          </>
-        )}
-      </main>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* 3D */}
+
+          <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="mb-4">
+              <h3 className="text-xl font-bold text-[#2E7D32]">
+                3D 메타버스 모니터링
+              </h3>
+            </div>
+
+            <div className="h-[420px] overflow-hidden rounded-lg border border-gray-200 bg-[#F1F8E9]">
+              <iframe
+                key={selectedFloor?.floorIndex}
+                id="unity-monitoring-frame"
+                src={unityUrl}
+                width="100%"
+                height="100%"
+                title="Unity WebGL Monitoring"
+                className="h-full w-full border-0"
+              />
+            </div>
+          </section>
+        </div>
+
+        {/* 전체 학생 */}
+
+        <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-xl font-bold text-[#2E7D32]">전체 학생 현황</h3>
+
+            <span className="text-sm text-gray-500">
+              총 {visibleStudents.length}명
+            </span>
+          </div>
+
+          <div className="overflow-auto rounded-2xl border border-[#C8E6C9]">
+            <table className="min-w-full text-sm">
+              <thead className="bg-[#F1F8E9]">
+                <tr>
+                  <th className="border-b px-4 py-3 text-left font-semibold text-gray-700">
+                    학생명
+                  </th>
+
+                  <th className="border-b px-4 py-3 text-left font-semibold text-gray-700">
+                    상태
+                  </th>
+
+                  <th className="border-b px-4 py-3 text-left font-semibold text-gray-700">
+                    위치
+                  </th>
+
+                  <th className="border-b px-4 py-3 text-left font-semibold text-gray-700">
+                    신호
+                  </th>
+
+                  <th className="border-b px-4 py-3 text-left font-semibold text-gray-700">
+                    마지막 감지
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {visibleStudents.map((student) => {
+                  const state = getStudentDetectState(student);
+
+                  return (
+                    <tr key={student.studentId}>
+                      {/* 학생명 */}
+                      <td className="border-b px-4 py-3 text-gray-700">
+                        {student.studentName || "이름 없음"}
+                      </td>
+
+                      {/* 상태 */}
+                      <td className="border-b px-4 py-3">
+                        <span
+                          className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                            state === "DETECTED"
+                              ? "bg-green-100 text-green-700"
+                              : state === "LOST"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-gray-100 text-gray-700"
+                          }`}
+                        >
+                          {state}
+                        </span>
+                      </td>
+
+                      {/* 위치 */}
+                      <td className="border-b px-4 py-3 text-gray-700">
+                        {getStudentLocationName(student)}
+                      </td>
+
+                      {/* 신호 */}
+                      <td className="border-b px-4 py-3 text-gray-700">
+                        {getSignalText(student.lastRssi)}
+                      </td>
+
+                      {/* 마지막 감지 */}
+                      <td className="border-b px-4 py-3 text-gray-700">
+                        {formatTime(student.lastSeenAt)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

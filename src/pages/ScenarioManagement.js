@@ -3,7 +3,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import Navbar from "../components/Navbar";
 import axios from "axios";
 import { useLocation } from "react-router-dom";
-import API_BASE from "../apiBase";
+
+const API_BASE = process.env.REACT_APP_API_BASE_URL;
 
 // 재난 유형별 팀 구성 매핑
 const TEAM_TYPES_BY_DISASTER = {

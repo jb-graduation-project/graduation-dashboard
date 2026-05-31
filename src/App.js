@@ -17,6 +17,7 @@ import ScenarioManagement from "./pages/ScenarioManagement";
 import Monitoring from "./pages/Monitoring";
 import AnalysisResult from "./pages/AnalysisResult";
 import RoomList from "./pages/RoomList";
+import ManualPage from "./pages/ManualPage";
 
 function App() {
   return (
@@ -32,8 +33,9 @@ function App() {
         <Route path="/school-setting" element={<SchoolSetting />} />
         <Route path="/scenario" element={<ScenarioManagement />} />
         <Route path="/monitoring" element={<Monitoring />} />
-        <Route path="/analysis" element={<AnalysisResult />} />
+        <Route path="/analysis/:scenarioId" element={<AnalysisResult />} />
         <Route path="/room-list" element={<RoomList />} />
+        <Route path="/manual" element={<ManualPage />} />
       </Routes>
     </Router>
   );

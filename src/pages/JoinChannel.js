@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import API_BASE from "../apiBase";
+
+const API_BASE = process.env.REACT_APP_API_BASE_URL;
 
 function JoinChannel() {
   const [code, setCode] = useState("");
