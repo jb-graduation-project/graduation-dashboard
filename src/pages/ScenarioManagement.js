@@ -3,9 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Navbar from "../components/Navbar";
 import axios from "axios";
 import { useLocation } from "react-router-dom";
-
-// ✅ 새 서버 주소
-const API_BASE = "https://disasterar.onenyang.shop";
+import API_BASE from "../apiBase";
 
 // 재난 유형별 팀 구성 매핑
 const TEAM_TYPES_BY_DISASTER = {

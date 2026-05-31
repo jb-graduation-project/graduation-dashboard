@@ -2,8 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import Navbar from "../components/Navbar";
-
-const API_BASE = "https://disasterar.onenyang.shop";
+import API_BASE from "../apiBase";
 
 function SchoolChannel() {
   const location = useLocation();

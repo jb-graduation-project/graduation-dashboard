@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
-
-const API_BASE = "https://disasterar.onenyang.shop";
+import API_BASE from "../apiBase";
 
 function Navbar() {
   const navigate = useNavigate();

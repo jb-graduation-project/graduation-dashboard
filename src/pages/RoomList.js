@@ -2,8 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
-
-const API_BASE = "https://disasterar.onenyang.shop";
+import API_BASE from "../apiBase";
 
 function RoomList() {
   const location = useLocation();

@@ -9,8 +9,7 @@ import React, {
 import Navbar from "../components/Navbar";
 import axios from "axios";
 import { useLocation } from "react-router-dom";
-
-const API_BASE = "https://disasterar.onenyang.shop";
+import API_BASE from "../apiBase";
 
 export default function SchoolSetting() {
   const location = useLocation();
