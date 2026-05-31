@@ -1366,6 +1366,10 @@ export default function SchoolSetting() {
       const data = res.data || {};
       setActiveMapVersionId(data.mapVersionId || null);
 
+      console.log("🔥 active map 전체 응답 =", data);
+      console.log("🔥 active map mapVersionId =", data.mapVersionId);
+      console.log("🔥 active map floorsJson =", data.floorsJson);
+
       if (!data.floorsJson) return;
 
       const parsedFloors = JSON.parse(data.floorsJson);
@@ -1380,7 +1384,8 @@ export default function SchoolSetting() {
           return {
             floorIndex: serverFloorIndex,
             floorLabel: f?.floorLabel || f?.name || `${serverFloorIndex}층`,
-            imageSrc: f?.image?.src || null,
+            imageSrc:
+              toPublicImg(f?.image?.src) || toPublicImg(thumbnailImage) || null,
             uploadedFile: null,
             imgNatural: f?.image?.natural || { w: 0, h: 0 },
             elements: Array.isArray(f?.elements)
@@ -2343,13 +2348,8 @@ export default function SchoolSetting() {
     if (!schoolId) return;
 
     fetchBeacons();
-
-    // classroomId가 있으면 active map을 우선 사용
-    // classroomId가 없을 때만 학교 구조도 목록 사용
-    if (!classroomId) {
-      fetchSchoolMaps();
-    }
-  }, [schoolId, classroomId, fetchBeacons, fetchSchoolMaps]);
+    fetchSchoolMaps();
+  }, [schoolId, fetchBeacons, fetchSchoolMaps]);
 
   useEffect(() => {
     if (!classroomId) return;
@@ -3939,6 +3939,33 @@ export default function SchoolSetting() {
           },
         );
       } else {
+        // ✅ 비콘을 우클릭한 경우: 수정 버튼 추가
+        if (hit.el.type === "비콘") {
+          opts.push({
+            label: "비콘 정보 수정",
+            action: () => {
+              setMode(null);
+
+              setEditingBeaconId(hit.el.id);
+
+              setPendingBeaconNat({
+                x: hit.el.x,
+                y: hit.el.y,
+                floorIdx: currentFloorIndex,
+              });
+
+              setBeaconForm({
+                uuid: hit.el.beaconUuid || "",
+                major: String(hit.el.beaconMajor ?? ""),
+                minor: String(hit.el.beaconMinor ?? ""),
+              });
+
+              setContextMenu(null);
+              setIsBeaconModalOpen(true);
+            },
+          });
+        }
+
         opts.push({
           label: "삭제",
           action: async () => {
@@ -3947,6 +3974,7 @@ export default function SchoolSetting() {
             if (hit.el.type === "비콘" && hit.el.serverBeaconId) {
               const ok = await deleteBeaconOnServer(hit.el.serverBeaconId);
               if (!ok) return;
+
               await fetchBeacons();
             }
 
@@ -4198,7 +4226,8 @@ export default function SchoolSetting() {
         setFloorNames(parsedFloors.map((f, idx) => f?.name || `${idx + 1}층`));
         setFloors(
           parsedFloors.map((f, idx) => ({
-            imageSrc: f?.image?.src || null,
+            imageSrc:
+              toPublicImg(f?.image?.src) || toPublicImg(thumbnailImage) || null,
             uploadedFile: null,
             imgNatural: f?.image?.natural || { w: 0, h: 0 },
             elements: Array.isArray(f?.elements)
@@ -5744,7 +5773,7 @@ export default function SchoolSetting() {
                       setBeaconForm((p) => ({ ...p, major: e.target.value }))
                     }
                     className="w-full border rounded px-3 py-2"
-                    placeholder="예: 3"
+                    placeholder="예: 301"
                     inputMode="numeric"
                   />
                 </div>
@@ -5757,7 +5786,7 @@ export default function SchoolSetting() {
                       setBeaconForm((p) => ({ ...p, minor: e.target.value }))
                     }
                     className="w-full border rounded px-3 py-2"
-                    placeholder="예: 301"
+                    placeholder="예: 3"
                     inputMode="numeric"
                   />
                 </div>

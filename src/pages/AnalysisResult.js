@@ -117,7 +117,16 @@ function AnalysisResult() {
 
   useEffect(() => {
     const fetchStudentNames = async () => {
-      const classroomId = localStorage.getItem("classroomId");
+      let roomContext = {};
+
+      try {
+        roomContext = JSON.parse(localStorage.getItem("roomContext") || "{}");
+      } catch {
+        roomContext = {};
+      }
+
+      const classroomId =
+        localStorage.getItem("classroomId") || roomContext?.classroomId || null;
 
       if (!classroomId) {
         console.warn("[AnalysisResult] classroomId가 없어 학생 이름 조회 생략");
@@ -207,6 +216,7 @@ function AnalysisResult() {
       parsedStudentEvaluations.length;
 
     const averageScore =
+      scenarioEvaluation?.scoreTotalRounded ??
       scenarioDetailsJson.averageScore ??
       scenarioScoreJson.average ??
       scenarioEvaluation?.scoreTotal ??
@@ -221,12 +231,19 @@ function AnalysisResult() {
       );
 
     const safezoneCompletedCount = parsedStudentEvaluations.filter(
-      (student) => student.detailsJson?.safeZoneCompleted === true,
+      (student) =>
+        (student.safeZoneCompleted ??
+          student.detailsJson?.safeZoneCompleted) === true,
     ).length;
 
     const totalCorrectQuizCount = parsedStudentEvaluations.reduce(
       (sum, student) =>
-        sum + Number(student.detailsJson?.correctQuizCount || 0),
+        sum +
+        Number(
+          student.correctQuizCount ??
+            student.detailsJson?.correctQuizCount ??
+            0,
+        ),
       0,
     );
 
@@ -371,9 +388,14 @@ function AnalysisResult() {
               <thead className="bg-[#2E7D32] text-white">
                 <tr>
                   <th className="px-4 py-3 border whitespace-nowrap">학생명</th>
+                  <th className="px-4 py-3 border whitespace-nowrap">
+                    배정 역할
+                  </th>
                   <th className="px-4 py-3 border whitespace-nowrap">총점</th>
                   <th className="px-4 py-3 border whitespace-nowrap">퀴즈</th>
-                  <th className="px-4 py-3 border whitespace-nowrap">역할</th>
+                  <th className="px-4 py-3 border whitespace-nowrap">
+                    역할 점수
+                  </th>
                   <th className="px-4 py-3 border whitespace-nowrap">개인</th>
                   <th className="px-4 py-3 border whitespace-nowrap">
                     안전구역
@@ -392,7 +414,7 @@ function AnalysisResult() {
                 {parsedStudentEvaluations.length === 0 ? (
                   <tr>
                     <td
-                      colSpan="9"
+                      colSpan="10"
                       className="px-4 py-8 text-center text-gray-500 border"
                     >
                       평가 결과가 없습니다.
@@ -400,17 +422,28 @@ function AnalysisResult() {
                   </tr>
                 ) : (
                   parsedStudentEvaluations.map((student) => {
-                    const quizScore = student.scoreJson?.quiz ?? 0;
-                    const roleScore = student.scoreJson?.role ?? 0;
-                    const personalScore = student.scoreJson?.personal ?? 0;
-                    const safezoneScore = student.scoreJson?.safezone ?? 0;
+                    const quizScore =
+                      student.quizScore ?? student.scoreJson?.quiz ?? 0;
+
+                    const roleScore =
+                      student.roleScore ?? student.scoreJson?.role ?? 0;
+
+                    const personalScore =
+                      student.personalScore ?? student.scoreJson?.personal ?? 0;
+
+                    const safezoneScore =
+                      student.safezoneScore ?? student.scoreJson?.safezone ?? 0;
+
                     const totalScore =
-                      student.scoreJson?.total ?? student.scoreTotal ?? 0;
+                      student.scoreTotal ?? student.scoreJson?.total ?? 0;
 
                     const correctQuizCount =
-                      student.detailsJson?.correctQuizCount ?? 0;
+                      student.correctQuizCount ??
+                      student.detailsJson?.correctQuizCount ??
+                      0;
 
                     const safeZoneCompleted =
+                      student.safeZoneCompleted ??
                       student.detailsJson?.safeZoneCompleted;
 
                     return (
@@ -420,6 +453,10 @@ function AnalysisResult() {
                       >
                         <td className="px-4 py-3 border font-medium whitespace-nowrap">
                           {getStudentName(student)}
+                        </td>
+
+                        <td className="px-4 py-3 border text-center whitespace-nowrap">
+                          {student.teamName || student.teamCode || "-"}
                         </td>
 
                         <td className="px-4 py-3 border text-center font-bold text-[#2E7D32] whitespace-nowrap">

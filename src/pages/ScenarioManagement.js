@@ -7,9 +7,16 @@ import { useLocation } from "react-router-dom";
 const API_BASE = process.env.REACT_APP_API_BASE_URL;
 
 // 재난 유형별 팀 구성 매핑
+// 화재 시나리오는 백엔드에서 요구하는 teamCode를 반드시 사용합니다.
 const TEAM_TYPES_BY_DISASTER = {
-  지진: ["시민팀", "팀1", "팀2"],
-  화재: ["소화팀", "응급처치팀", "시민팀"],
+  화재: [
+    { teamCode: "FIRE", teamName: "소화팀" },
+    { teamCode: "CIVILIAN", teamName: "시민" },
+    { teamCode: "EMERGENCY", teamName: "응급팀" },
+  ],
+
+  // 지진 시나리오의 실제 teamCode는 백엔드 명세 확인 후 변경하세요.
+  지진: [{ teamCode: "CIVILIAN", teamName: "시민" }],
 };
 
 // 재난 유형별 발생 설정 라벨
@@ -22,14 +29,23 @@ function ScenarioManagement() {
   const location = useLocation();
 
   // ✅ fallback 절대 금지
+  const storedRoomContext = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("roomContext") || "{}");
+    } catch {
+      return {};
+    }
+  }, []);
+
   const classroomId = useMemo(() => {
     return (
       location.state?.classroomId ||
       location.state?.roomId ||
       location.state?.classroomID ||
+      storedRoomContext?.classroomId ||
       null
     );
-  }, [location.state]);
+  }, [location.state, storedRoomContext]);
 
   const authHeaders = useMemo(() => {
     const token = localStorage.getItem("token");
@@ -82,11 +98,7 @@ function ScenarioManagement() {
   const npcPositions = ["입구", "복도", "계단", "출구"];
   const npcStatuses = ["정상", "이상", "대기"];
 
-  const teamTypes = TEAM_TYPES_BY_DISASTER[disasterType] || [
-    "팀A",
-    "팀B",
-    "팀C",
-  ];
+  const teamTypes = TEAM_TYPES_BY_DISASTER[disasterType] || [];
 
   const occurConfig = OCCUR_CONFIG[disasterType] || {
     locationLabel: "발생 위치",
@@ -110,9 +122,11 @@ function ScenarioManagement() {
   useEffect(() => {
     setTeamCounts((prev) => {
       const next = {};
+
       teamTypes.forEach((team) => {
-        next[team] = prev[team] || "";
+        next[team.teamCode] = prev[team.teamCode] || "";
       });
+
       return next;
     });
   }, [disasterType]);
@@ -127,6 +141,21 @@ function ScenarioManagement() {
     setTrainingTime(onlyNumber);
   };
 
+  const buildManualTeamCounts = () => {
+    return (
+      teamTypes
+        .map((team) => ({
+          teamCode: team.teamCode,
+          teamName: team.teamName,
+          maxMembers: Number(teamCounts[team.teamCode] || 0),
+        }))
+        // 인원이 0명인 팀은 요청에서 제외해야 합니다.
+        .filter((team) => team.maxMembers > 0)
+    );
+  };
+  const activeStudentCount = useMemo(() => {
+    return Number(location.state?.studentCount ?? 0);
+  }, [location.state]);
   // 서버 응답 정규화
   const normalizeScenario = (s) => {
     return {
@@ -158,12 +187,18 @@ function ScenarioManagement() {
 
     const trainTime = trainingTime ? parseInt(trainingTime, 10) : 0;
 
-    const teamAssignment = JSON.stringify(teamCounts || {});
+    const normalizedTeamCounts = Object.fromEntries(
+      Object.entries(teamCounts || {}).map(([teamCode, count]) => [
+        teamCode,
+        Number(count || 0),
+      ]),
+    );
+
+    const teamAssignment = JSON.stringify(normalizedTeamCounts);
     const npcPositions = JSON.stringify({
       position: npcPosition || "",
       status: npcStatus || "",
     });
-
     const base = {
       classroomId,
       scenarioName: scenarioName?.trim() || `${disasterType} 시나리오`,
@@ -197,6 +232,32 @@ function ScenarioManagement() {
     }
 
     return base;
+  };
+
+  const saveScenarioConfigToLocalStorage = ({
+    scenarioId,
+    scenarioType,
+    teamMode,
+    teamAssignment,
+  }) => {
+    try {
+      const prev = JSON.parse(localStorage.getItem("gameContext") || "{}");
+
+      localStorage.setItem(
+        "gameContext",
+        JSON.stringify({
+          ...prev,
+          classroomId,
+          scenarioId,
+          activeScenarioId: scenarioId,
+          scenarioType,
+          teamMode,
+          teamAssignmentJson: teamAssignment || "{}",
+        }),
+      );
+    } catch (err) {
+      console.error("gameContext 저장 실패 =", err);
+    }
   };
 
   const showAxiosError = (title, errOrRes) => {
@@ -285,6 +346,7 @@ function ScenarioManagement() {
       setSaving(true);
 
       const payload = makePayload({ includeScenarioId: false });
+
       const res = await axios.post(
         `${API_BASE}/api/scenarios`,
         payload,
@@ -297,20 +359,16 @@ function ScenarioManagement() {
       }
 
       alert("✅ 시나리오가 생성되었습니다.");
+
       const createdScenarioId = res.data?.scenarioId || res.data?.id || null;
 
-      const prev = JSON.parse(localStorage.getItem("gameContext") || "{}");
-
-      localStorage.setItem(
-        "gameContext",
-        JSON.stringify({
-          ...prev,
-          classroomId,
-          scenarioId: createdScenarioId,
-          activeScenarioId: createdScenarioId,
-          scenarioType: payload.scenarioType,
-        }),
-      );
+      // ✅ 여기에 추가
+      saveScenarioConfigToLocalStorage({
+        scenarioId: createdScenarioId,
+        scenarioType: payload.scenarioType,
+        teamMode: payload.teamMode,
+        teamAssignment: payload.teamAssignment,
+      });
 
       setSelectedScenarioId(createdScenarioId);
 
@@ -382,6 +440,13 @@ function ScenarioManagement() {
       }
 
       alert("✅ 시나리오가 수정되었습니다.");
+
+      saveScenarioConfigToLocalStorage({
+        scenarioId: selectedScenarioId,
+        scenarioType: payload.scenarioType,
+        teamMode: payload.teamMode,
+        teamAssignment: payload.teamAssignment,
+      });
       await fetchScenarioList();
     } catch (err) {
       console.error(err);
@@ -522,6 +587,126 @@ function ScenarioManagement() {
       return null;
     }
   };
+  // ✅ 팀별 정원 저장
+  const distributeTeams = async (scenarioId) => {
+    if (!scenarioId) {
+      alert("팀을 설정할 scenarioId가 없습니다.");
+      return null;
+    }
+
+    const isManual = teamSetting === "수동설정";
+
+    let payload = {
+      mode: isManual ? "MANUAL" : "AUTO",
+    };
+
+    if (isManual) {
+      const manualTeamCounts = buildManualTeamCounts();
+
+      if (manualTeamCounts.length === 0) {
+        alert("수동 팀 설정을 사용할 경우 팀별 인원 수를 입력하세요.");
+        return null;
+      }
+
+      const totalManualCount = manualTeamCounts.reduce(
+        (sum, team) => sum + Number(team.maxMembers || 0),
+        0,
+      );
+
+      if (activeStudentCount > 0 && totalManualCount !== activeStudentCount) {
+        alert(
+          `팀별 인원 수 합계(${totalManualCount}명)가 ` +
+            `전체 학생 수(${activeStudentCount}명)와 같아야 합니다.`,
+        );
+
+        return null;
+      }
+
+      const teamCodes = manualTeamCounts.map((team) => team.teamCode);
+
+      const hasDuplicatedTeamCode =
+        new Set(teamCodes).size !== teamCodes.length;
+
+      if (hasDuplicatedTeamCode) {
+        alert("중복된 팀 코드가 있습니다.");
+        return null;
+      }
+
+      payload = {
+        mode: "MANUAL",
+        manualTeamCounts,
+      };
+    }
+
+    console.log("팀별 정원 저장 payload =", payload);
+
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/scenarios/${scenarioId}/teams/distribute`,
+        payload,
+        axiosConfig,
+      );
+
+      console.log("팀별 정원 저장 응답 =", res.status, res.data);
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("팀별 정원 저장 실패", res);
+        return null;
+      }
+
+      return res.data || null;
+    } catch (err) {
+      console.error(err);
+      showAxiosError("팀별 정원 저장 중 오류", err);
+      return null;
+    }
+  };
+
+  // ✅ 저장된 팀 정원을 기준으로 학생 랜덤 배정
+  const assignStudentsToTeams = async (scenarioId) => {
+    if (!scenarioId) {
+      alert("학생을 배정할 scenarioId가 없습니다.");
+      return null;
+    }
+
+    try {
+      const res = await axios.post(
+        `${API_BASE}/api/scenarios/${scenarioId}/teams/assign-students`,
+        {},
+        axiosConfig,
+      );
+
+      console.log("✅ 학생 팀 배정 응답 =", res.status, res.data);
+
+      if (!(res.status >= 200 && res.status < 300)) {
+        showAxiosError("학생 팀 배정 실패", res);
+        return null;
+      }
+
+      return res.data || null;
+    } catch (err) {
+      console.error(err);
+      showAxiosError("학생 팀 배정 중 오류", err);
+      return null;
+    }
+  };
+  // ✅ 팀 정원을 저장한 뒤 학생을 랜덤 배정
+  const handleConfirmTeamAssignment = async () => {
+    if (!selectedScenarioId) {
+      alert("먼저 시나리오를 저장하거나 목록에서 선택하세요.");
+      return;
+    }
+
+    const distributed = await distributeTeams(selectedScenarioId);
+    if (!distributed) return;
+
+    const assigned = await assignStudentsToTeams(selectedScenarioId);
+    if (!assigned) return;
+
+    console.log("✅ 최종 학생별 팀 배정 결과 =", assigned);
+
+    alert("✅ 팀별 정원 저장 및 학생 랜덤 배정이 완료되었습니다.");
+  };
 
   // ✅ 시나리오 평가 실행
   const evaluateScenario = async (scenarioId) => {
@@ -600,17 +785,12 @@ function ScenarioManagement() {
     setFireLocation(s.location || "");
     setTrainingTime(s.trainTime ? String(s.trainTime) : "");
 
-    const prev = JSON.parse(localStorage.getItem("gameContext") || "{}");
-    localStorage.setItem(
-      "gameContext",
-      JSON.stringify({
-        ...prev,
-        classroomId,
-        scenarioId: s.id,
-        activeScenarioId: s.id,
-        scenarioType: s.scenarioType,
-      }),
-    );
+    saveScenarioConfigToLocalStorage({
+      scenarioId: s.id,
+      scenarioType: s.scenarioType,
+      teamMode: s.teamMode,
+      teamAssignment: s.teamAssignmentJson,
+    });
 
     alert("✅ 시작할 시나리오로 활성화되었습니다.");
 
@@ -827,6 +1007,10 @@ function ScenarioManagement() {
         {/* 팀 설정 */}
         <div className="p-4 bg-white rounded shadow space-y-4">
           <h3 className="text-xl font-semibold text-[#2E7D32]">팀 설정</h3>
+          <p className="text-sm text-gray-600">
+            현재 배정 대상 학생 수:{" "}
+            <span className="font-bold">{activeStudentCount}명</span>
+          </p>
           <select
             value={teamSetting}
             onChange={(e) => setTeamSetting(e.target.value)}
@@ -846,15 +1030,16 @@ function ScenarioManagement() {
               const disabled = teamSetting === "자동설정" || isAllAuto;
 
               return (
-                <div key={team} className="flex flex-col space-y-1">
-                  <span className="font-medium">{team}</span>
+                <div key={team.teamCode} className="flex flex-col space-y-1">
+                  <span className="font-medium">{team.teamName}</span>
+
                   <input
                     type="number"
                     min="0"
                     placeholder="인원 수"
-                    value={teamCounts[team] || ""}
+                    value={teamCounts[team.teamCode] || ""}
                     onChange={(e) =>
-                      handleTeamCountChange(team, e.target.value)
+                      handleTeamCountChange(team.teamCode, e.target.value)
                     }
                     disabled={disabled}
                     className={`border px-2 py-2 rounded w-full text-right ${
@@ -937,28 +1122,6 @@ function ScenarioManagement() {
                 ? "수정 저장"
                 : "시나리오 저장"}
           </button>
-
-          {selectedScenarioId && (
-            <button
-              onClick={() => {
-                setSelectedScenarioId(null);
-                setScenarioName("");
-                setDisasterType("지진");
-                setFireSetting("자동설정");
-                setFireLocation("");
-                setTrainingTime("");
-                setTeamSetting("자동설정");
-                setTeamCounts({});
-                setNpcSetting("자동설정");
-                setNpcPosition("");
-                setNpcStatus("");
-              }}
-              disabled={saving}
-              className="px-6 py-3 bg-gray-400 text-white rounded-lg shadow disabled:opacity-60"
-            >
-              새 시나리오 작성
-            </button>
-          )}
         </div>
       </div>
     </div>

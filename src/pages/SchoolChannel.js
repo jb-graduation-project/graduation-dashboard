@@ -9,8 +9,25 @@ function SchoolChannel() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  const TEAM_NAME_BY_CODE = {
+    FIRE: "소화팀",
+    CIVILIAN: "시민",
+    EMERGENCY: "응급팀",
+  };
+
+  const storedRoomContext = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("roomContext") || "{}");
+    } catch {
+      return {};
+    }
+  }, []);
+
   const classroomId =
-    location.state?.classroomId || location.state?.roomId || null;
+    location.state?.classroomId ||
+    location.state?.roomId ||
+    storedRoomContext?.classroomId ||
+    null;
 
   const userId = useMemo(() => {
     try {
@@ -21,15 +38,21 @@ function SchoolChannel() {
     }
   }, []);
 
-  const initialJoinCode = location.state?.joinCode || "UNKNOWN";
+  const initialJoinCode =
+    location.state?.joinCode || storedRoomContext?.joinCode || "UNKNOWN";
   const [joinCode, setJoinCode] = useState(initialJoinCode);
 
   const [className, setClassName] = useState(
-    location.state?.className || location.state?.roomName || "교실",
+    location.state?.className ||
+      location.state?.roomName ||
+      storedRoomContext?.className ||
+      "교실",
   );
 
   const [studentCount, setStudentCount] = useState(
-    Number(location.state?.studentCount ?? 0),
+    Number(
+      location.state?.studentCount ?? storedRoomContext?.studentCount ?? 0,
+    ),
   );
 
   const [students, setStudents] = useState([]);
@@ -46,6 +69,19 @@ function SchoolChannel() {
   const [gameContext, setGameContext] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("gameContext") || "null");
+    } catch {
+      return null;
+    }
+  });
+
+  // ✅ 마지막으로 종료된 훈련의 분석 결과 조회용 scenarioId
+  const [resultScenarioId, setResultScenarioId] = useState(() => {
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem("lastResultContext") || "{}",
+      );
+
+      return saved?.scenarioId || null;
     } catch {
       return null;
     }
@@ -77,6 +113,46 @@ function SchoolChannel() {
     } catch {
       return {};
     }
+  };
+
+  const buildTeamDistributePayload = (storedContext) => {
+    const mode = String(storedContext?.teamMode || "AUTO").toUpperCase();
+
+    if (mode !== "MANUAL") {
+      return {
+        mode: "AUTO",
+      };
+    }
+
+    let parsedCounts = {};
+
+    try {
+      parsedCounts =
+        typeof storedContext?.teamAssignmentJson === "string"
+          ? JSON.parse(storedContext.teamAssignmentJson || "{}")
+          : storedContext?.teamAssignmentJson || {};
+    } catch {
+      parsedCounts = {};
+    }
+
+    const manualTeamCounts = Object.entries(parsedCounts)
+      .map(([teamCode, count]) => ({
+        teamCode,
+        teamName: TEAM_NAME_BY_CODE[teamCode] || teamCode,
+        maxMembers: Number(count || 0),
+      }))
+      .filter((team) => team.maxMembers > 0);
+
+    if (manualTeamCounts.length === 0) {
+      throw new Error(
+        "수동 팀 설정이 선택되어 있지만 팀별 인원 수가 저장되지 않았습니다.",
+      );
+    }
+
+    return {
+      mode: "MANUAL",
+      manualTeamCounts,
+    };
   };
 
   const saveGameContext = (data) => {
@@ -408,6 +484,109 @@ function SchoolChannel() {
     };
   };
 
+  const prepareStudentTeamAssignment = async (scenarioId) => {
+    if (!scenarioId) {
+      alert("팀을 배정할 scenarioId가 없습니다.");
+      return null;
+    }
+
+    const stored = getStoredGameContext();
+
+    let distributePayload;
+
+    try {
+      distributePayload = buildTeamDistributePayload(stored);
+    } catch (err) {
+      alert(err.message);
+      return null;
+    }
+
+    console.log("🔥 팀 정원 저장 요청 =", distributePayload);
+
+    const distributeRes = await axios.post(
+      `${API_BASE}/api/scenarios/${scenarioId}/teams/distribute`,
+      distributePayload,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
+        timeout: 10000,
+        validateStatus: () => true,
+      },
+    );
+
+    console.log(
+      "🔥 팀 정원 저장 응답 =",
+      distributeRes.status,
+      distributeRes.data,
+    );
+
+    if (!(distributeRes.status >= 200 && distributeRes.status < 300)) {
+      showError("팀별 정원 저장 실패", distributeRes);
+      return null;
+    }
+
+    const assignRes = await axios.post(
+      `${API_BASE}/api/scenarios/${scenarioId}/teams/assign-students`,
+      {},
+      {
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
+        timeout: 10000,
+        validateStatus: () => true,
+      },
+    );
+
+    console.log(
+      "🔥 학생 랜덤 팀 배정 응답 =",
+      assignRes.status,
+      assignRes.data,
+    );
+
+    if (!(assignRes.status >= 200 && assignRes.status < 300)) {
+      showError("학생 랜덤 팀 배정 실패", assignRes);
+      return null;
+    }
+
+    const assignmentResult = assignRes.data || {};
+    const totalStudents = Number(assignmentResult.totalStudents || 0);
+
+    if (totalStudents <= 0) {
+      alert(
+        "팀에 배정할 학생이 없습니다. 학생들이 입장 코드를 입력해 교실에 들어왔는지 확인하세요.",
+      );
+
+      return null;
+    }
+
+    const assignedCount = Array.isArray(assignmentResult.teams)
+      ? assignmentResult.teams.reduce(
+          (sum, team) => sum + Number(team.assignedCount || 0),
+          0,
+        )
+      : 0;
+
+    if (assignedCount !== totalStudents) {
+      alert(
+        `학생 팀 배정 인원이 맞지 않습니다.\n` +
+          `전체 학생: ${totalStudents}명\n` +
+          `배정 완료: ${assignedCount}명`,
+      );
+
+      return null;
+    }
+
+    saveGameContext({
+      ...stored,
+      lastTeamAssignmentResult: assignmentResult,
+    });
+
+    return assignmentResult;
+  };
+
   const handleTrainingStart = async (contextData = null) => {
     if (!classroomId) {
       alert("classroomId 없음");
@@ -525,9 +704,22 @@ function SchoolChannel() {
         return;
       }
 
-      alert("훈련이 종료되었습니다.");
+      localStorage.setItem(
+        "lastResultContext",
+        JSON.stringify({
+          scenarioId: resultScenarioId,
+          classroomId,
+          joinCode,
+          roomName: className,
+          studentCount,
+        }),
+      );
 
-      navigate(`/analysis/${resultScenarioId}`);
+      setResultScenarioId(resultScenarioId);
+
+      alert(
+        "훈련이 종료되었습니다.\n분석 결과 보기 버튼을 누르면 결과를 확인할 수 있습니다.",
+      );
     } catch (err) {
       showError("훈련 종료 상태 저장 중 오류", err);
     } finally {
@@ -551,10 +743,11 @@ function SchoolChannel() {
         return;
       }
 
-      // 🔥 여기 핵심 추가
+      // 1. 활성 시나리오 설정
       const activeSet = await setActiveScenarioToServer(scenarioId);
       if (!activeSet) return;
 
+      // 2. 구조도 및 학생 존재 여부 검사
       const validation = await validateTrainingStart();
 
       if (!validation.ok) {
@@ -562,17 +755,24 @@ function SchoolChannel() {
           "훈련을 시작할 수 없습니다.\n\n" +
             validation.errors.map((e, i) => `${i + 1}. ${e}`).join("\n"),
         );
+
         return;
       }
 
+      // 3. 팀 정원 저장 + 학생 랜덤 역할 배정
+      const assignmentResult = await prepareStudentTeamAssignment(scenarioId);
+
+      if (!assignmentResult) return;
+
+      // 4. 학생 배정 성공 후에만 훈련 시작
       const started = await handleTrainingStart(validation.context);
       if (!started) return;
 
+      // 5. 최신 게임 컨텍스트 다시 조회
       const context = await fetchGameStartContext();
       if (!context) return;
 
-      alert("게임 시작!");
-      // navigate("/game", { state: context });
+      alert("학생 역할 배정 후 훈련이 시작되었습니다.");
     } catch (err) {
       showError("게임 시작 실패", err);
     } finally {
@@ -582,8 +782,17 @@ function SchoolChannel() {
 
   useEffect(() => {
     if (!classroomId) return;
-    fetchStudents();
-  }, [classroomId, fetchStudents]);
+
+    localStorage.setItem(
+      "roomContext",
+      JSON.stringify({
+        classroomId,
+        joinCode,
+        className,
+        studentCount,
+      }),
+    );
+  }, [classroomId, joinCode, className, studentCount]);
 
   return (
     <div className="bg-[#F9FBE7] min-h-screen">
