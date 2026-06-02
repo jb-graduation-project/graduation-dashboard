@@ -135,9 +135,11 @@ function CreateChannel() {
         console.log("채널 생성 실패 응답 =", res.status, res.data);
 
         // 🔥 핵심: 중복 이름 처리
+        // ✅ 백엔드 에러 코드 기준으로 학교명 중복 처리
         if (
+          res.data?.code === "DUPLICATE_SCHOOL_NAME" ||
           msg.includes("이미 존재") ||
-          msg.includes("duplicate") ||
+          msg.toLowerCase().includes("duplicate") ||
           msg.includes("중복")
         ) {
           setSchoolNameError("이미 존재하는 학교 이름입니다.");

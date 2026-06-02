@@ -56,7 +56,7 @@ function ScenarioManagement() {
   const axiosConfig = useMemo(
     () => ({
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": "application/json; charset=UTF-8",
         ...authHeaders,
       },
       timeout: 10000,
@@ -153,9 +153,50 @@ function ScenarioManagement() {
         .filter((team) => team.maxMembers > 0)
     );
   };
-  const activeStudentCount = useMemo(() => {
-    return Number(location.state?.studentCount ?? 0);
-  }, [location.state]);
+  const [activeStudentCount, setActiveStudentCount] = useState(
+    Number(location.state?.studentCount ?? 0),
+  );
+
+  useEffect(() => {
+    const fetchActiveStudentCount = async () => {
+      if (!classroomId) {
+        setActiveStudentCount(0);
+        return;
+      }
+
+      try {
+        const res = await axios.get(
+          `${API_BASE}/api/rooms/${classroomId}/students`,
+          {
+            headers: { ...authHeaders },
+            timeout: 10000,
+            validateStatus: () => true,
+          },
+        );
+
+        if (!(res.status >= 200 && res.status < 300)) {
+          console.warn("학생 목록 조회 실패 =", res.status, res.data);
+          return;
+        }
+
+        const students = Array.isArray(res.data) ? res.data : [];
+
+        const activeStudents = students.filter((student) => {
+          const status = String(student?.status || "")
+            .trim()
+            .toUpperCase();
+
+          return student?.isKicked !== true && status !== "KICKED";
+        });
+
+        setActiveStudentCount(activeStudents.length);
+      } catch (err) {
+        console.error("학생 수 조회 중 오류 =", err);
+      }
+    };
+
+    fetchActiveStudentCount();
+  }, [classroomId, authHeaders]);
   // 서버 응답 정규화
   const normalizeScenario = (s) => {
     return {
@@ -259,14 +300,21 @@ function ScenarioManagement() {
       console.error("gameContext 저장 실패 =", err);
     }
   };
-
   const showAxiosError = (title, errOrRes) => {
-    if (errOrRes?.status) {
+    const response = errOrRes?.response || errOrRes;
+    const data = response?.data || {};
+    const code = data?.code || "";
+
+    if (code === "INVALID_JSON_REQUEST") {
+      alert("요청 JSON 형식 또는 인코딩을 확인해 주세요.");
+      return;
+    }
+
+    if (response?.status) {
       alert(
-        `${title} (${errOrRes.status})\n\n${
-          typeof errOrRes.data === "string"
-            ? errOrRes.data
-            : JSON.stringify(errOrRes.data, null, 2)
+        `${title} (${response.status})\n\n${
+          data?.message ||
+          (typeof data === "string" ? data : JSON.stringify(data, null, 2))
         }`,
       );
       return;
@@ -613,7 +661,16 @@ function ScenarioManagement() {
         0,
       );
 
-      if (activeStudentCount > 0 && totalManualCount !== activeStudentCount) {
+      if (activeStudentCount <= 0) {
+        alert(
+          "현재 배정할 학생이 없습니다.\n" +
+            "학생이 입장한 뒤 팀 배정을 다시 진행해 주세요.",
+        );
+
+        return null;
+      }
+
+      if (totalManualCount !== activeStudentCount) {
         alert(
           `팀별 인원 수 합계(${totalManualCount}명)가 ` +
             `전체 학생 수(${activeStudentCount}명)와 같아야 합니다.`,
@@ -696,6 +753,21 @@ function ScenarioManagement() {
       alert("먼저 시나리오를 저장하거나 목록에서 선택하세요.");
       return;
     }
+
+    // ✅ 현재 화면의 팀 설정을 localStorage에 먼저 저장
+    const normalizedTeamCounts = Object.fromEntries(
+      Object.entries(teamCounts || {}).map(([teamCode, count]) => [
+        teamCode,
+        Number(count || 0),
+      ]),
+    );
+
+    saveScenarioConfigToLocalStorage({
+      scenarioId: selectedScenarioId,
+      scenarioType: disasterType === "화재" ? "FIRE" : "EARTHQUAKE",
+      teamMode: teamSetting === "수동설정" ? "MANUAL" : "AUTO",
+      teamAssignment: JSON.stringify(normalizedTeamCounts),
+    });
 
     const distributed = await distributeTeams(selectedScenarioId);
     if (!distributed) return;

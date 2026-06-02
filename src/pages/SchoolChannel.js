@@ -156,11 +156,31 @@ function SchoolChannel() {
   };
 
   const saveGameContext = (data) => {
-    localStorage.setItem("gameContext", JSON.stringify(data));
-    setGameContext(data);
+    const prev = getStoredGameContext();
+
+    const next = {
+      ...prev,
+      ...(data || {}),
+
+      // ✅ game-start-context 응답에 값이 없어도 기존 팀 설정 유지
+      teamMode: data?.teamMode ?? prev?.teamMode ?? "AUTO",
+
+      teamAssignmentJson:
+        data?.teamAssignmentJson ?? prev?.teamAssignmentJson ?? "{}",
+    };
+
+    localStorage.setItem("gameContext", JSON.stringify(next));
+    setGameContext(next);
   };
 
   const getStudentDisplayStatus = (student) => {
+    const trainingState = student.trainingState || gameContext?.trainingState;
+
+    // ✅ 훈련이 종료되면 학생 개별 상태보다 우선해서 종료 표시
+    if (trainingState === "ENDED") {
+      return "훈련 종료";
+    }
+
     if (student.status && student.status !== "UNKNOWN") {
       if (student.status === "EVACUATING") return "대피 중";
       if (student.status === "EVACUATED") return "대피 완료";
@@ -168,11 +188,8 @@ function SchoolChannel() {
       return student.status;
     }
 
-    const trainingState = student.trainingState || gameContext?.trainingState;
-
     if (trainingState === "WAITING") return "훈련 대기중";
     if (trainingState === "RUNNING") return "훈련 진행중";
-    if (trainingState === "ENDED") return "훈련 종료";
 
     return "훈련 대기중";
   };
@@ -231,6 +248,13 @@ function SchoolChannel() {
       setStudentLoading(false);
     }
   }, [classroomId, authHeaders]);
+
+  // ✅ 페이지에 처음 들어오거나 다시 돌아왔을 때 학생 목록 자동 조회
+  useEffect(() => {
+    if (!classroomId) return;
+
+    fetchStudents();
+  }, [classroomId, fetchStudents]);
 
   const fetchGameStartContext = useCallback(async () => {
     if (!classroomId) {
@@ -326,7 +350,10 @@ function SchoolChannel() {
         `${API_BASE}/api/rooms/${classroomId}`,
         payload,
         {
-          headers: { "Content-Type": "application/json", ...authHeaders },
+          headers: {
+            "Content-Type": "application/json; charset=UTF-8",
+            ...authHeaders,
+          },
           timeout: 10000,
           validateStatus: () => true,
         },
@@ -408,7 +435,10 @@ function SchoolChannel() {
       `${API_BASE}/api/rooms/${classroomId}/active-scenario`,
       { scenarioId },
       {
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: {
+          "Content-Type": "application/json; charset=UTF-8",
+          ...authHeaders,
+        },
         timeout: 10000,
         validateStatus: () => true,
       },
@@ -492,6 +522,8 @@ function SchoolChannel() {
 
     const stored = getStoredGameContext();
 
+    console.log("🔥 팀 배정 직전 gameContext =", stored);
+
     let distributePayload;
 
     try {
@@ -508,7 +540,7 @@ function SchoolChannel() {
       distributePayload,
       {
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type": "application/json; charset=UTF-8",
           ...authHeaders,
         },
         timeout: 10000,
@@ -532,7 +564,7 @@ function SchoolChannel() {
       {},
       {
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type": "application/json; charset=UTF-8",
           ...authHeaders,
         },
         timeout: 10000,
@@ -614,7 +646,10 @@ function SchoolChannel() {
         `${API_BASE}/api/rooms/${classroomId}/training/start`,
         payload,
         {
-          headers: { "Content-Type": "application/json", ...authHeaders },
+          headers: {
+            "Content-Type": "application/json; charset=UTF-8",
+            ...authHeaders,
+          },
           timeout: 10000,
           validateStatus: () => true,
         },
@@ -671,7 +706,7 @@ function SchoolChannel() {
         payload,
         {
           headers: {
-            "Content-Type": "application/json",
+            "Content-Type": "application/json; charset=UTF-8",
             ...authHeaders,
           },
           timeout: 10000,
@@ -698,6 +733,9 @@ function SchoolChannel() {
       };
 
       saveGameContext(nextContext);
+
+      // ✅ 훈련 종료 후 학생 상태를 다시 조회
+      await fetchStudents();
 
       if (!resultScenarioId) {
         alert("훈련은 종료되었지만 분석 결과를 불러올 시나리오 ID가 없습니다.");

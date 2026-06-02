@@ -91,6 +91,48 @@ export default function Monitoring() {
     return "LOST";
   };
 
+  const getStudentStatusText = (student) => {
+    const status = String(student?.status || "UNKNOWN")
+      .trim()
+      .toUpperCase();
+
+    switch (status) {
+      case "EVACUATING":
+        return "대피 중";
+
+      case "EVACUATED":
+        return "대피 완료";
+
+      case "RESTRICTED":
+        return "제한구역";
+
+      case "UNKNOWN":
+      default:
+        return "상태 미확인";
+    }
+  };
+
+  const getStudentStatusClass = (student) => {
+    const status = String(student?.status || "UNKNOWN")
+      .trim()
+      .toUpperCase();
+
+    switch (status) {
+      case "EVACUATED":
+        return "bg-green-100 text-green-700";
+
+      case "EVACUATING":
+        return "bg-blue-100 text-blue-700";
+
+      case "RESTRICTED":
+        return "bg-red-100 text-red-700";
+
+      case "UNKNOWN":
+      default:
+        return "bg-gray-100 text-gray-700";
+    }
+  };
+
   const getSignalText = (rssi) => {
     if (rssi === null || rssi === undefined) {
       return "미감지";
@@ -108,11 +150,16 @@ export default function Monitoring() {
   };
 
   const getMarkerZoneId = (marker) => {
+    return marker?.zoneElementId || marker?.elementId || "";
+  };
+
+  const getMarkerKey = (marker) => {
     return (
+      marker?.beaconId ||
+      marker?.beaconElementId ||
       marker?.zoneElementId ||
       marker?.elementId ||
-      marker?.beaconElementId ||
-      marker?.beaconId
+      ""
     );
   };
 
@@ -434,26 +481,10 @@ export default function Monitoring() {
   });
 
   const getMarkerPosition = (marker) => {
-    // 1. 비콘과 연결된 구역 ID
-    const zoneId = marker?.zoneElementId || marker?.elementId;
-
-    // 2. 연결된 구역 찾기
-    const matchedZone = (selectedFloor?.elements || []).find((element) => {
-      return String(element?.id || "") === String(zoneId || "");
-    });
-
-    // 3. 구역이 있으면 구역 중앙에 마커 표시
-    if (matchedZone) {
-      return {
-        x: Number(matchedZone.x || 0) + Number(matchedZone.width || 0) / 2,
-        y: Number(matchedZone.y || 0) + Number(matchedZone.height || 0) / 2,
-      };
-    }
-
-    // 4. 구역 연결이 없으면 실제 비콘 설치 위치 사용
+    // ✅ 1순위: 구조도에 저장된 실제 비콘 요소의 좌표 사용
     const matchedBeacon = beaconElements.find((element) => {
       const elementBeaconId = String(
-        element.serverBeaconId || element.beaconId || "",
+        element?.serverBeaconId || element?.beaconId || "",
       );
 
       const markerBeaconId = String(marker?.beaconId || "");
@@ -470,10 +501,34 @@ export default function Monitoring() {
       };
     }
 
-    // 5. 마지막 fallback
+    // ✅ 2순위: monitoring-map 응답의 좌표 사용
+    const markerX = Number(marker?.x);
+    const markerY = Number(marker?.y);
+
+    if (Number.isFinite(markerX) && Number.isFinite(markerY)) {
+      return {
+        x: markerX,
+        y: markerY,
+      };
+    }
+
+    // ✅ 3순위: 좌표를 찾지 못한 경우에만 연결 구역 중앙 사용
+    const zoneId = marker?.zoneElementId || marker?.elementId;
+
+    const matchedZone = (selectedFloor?.elements || []).find((element) => {
+      return String(element?.id || "") === String(zoneId || "");
+    });
+
+    if (matchedZone) {
+      return {
+        x: Number(matchedZone.x || 0) + Number(matchedZone.width || 0) / 2,
+        y: Number(matchedZone.y || 0) + Number(matchedZone.height || 0) / 2,
+      };
+    }
+
     return {
-      x: Number(marker?.x || 0),
-      y: Number(marker?.y || 0),
+      x: 0,
+      y: 0,
     };
   };
 
@@ -509,10 +564,7 @@ export default function Monitoring() {
 
         if (!matchedMarker) continue;
 
-        const zoneId =
-          matchedMarker.zoneElementId ||
-          matchedMarker.elementId ||
-          matchedMarker.beaconElementId;
+        const zoneId = matchedMarker.zoneElementId || matchedMarker.elementId;
 
         const matchedZone = (floor?.elements || []).find(
           (element) => String(element?.id || "") === String(zoneId || ""),
@@ -520,6 +572,10 @@ export default function Monitoring() {
 
         if (matchedZone?.name) {
           return matchedZone.name;
+        }
+
+        if (matchedMarker?.placementName) {
+          return matchedMarker.placementName;
         }
 
         return "매핑 갱신 필요";
@@ -642,12 +698,14 @@ export default function Monitoring() {
   const getMarkerDisplayName = (marker) => {
     const zoneElement = findZoneElementByMarker(marker);
 
-    // 현재 활성 구조도에서 연결된 구역을 찾은 경우에만 방 이름 표시
     if (zoneElement?.name) {
       return zoneElement.name;
     }
 
-    // 과거 placementName을 그대로 보여주지 않음
+    if (marker?.placementName) {
+      return marker.placementName;
+    }
+
     return "매핑 갱신 필요";
   };
 
@@ -658,21 +716,16 @@ export default function Monitoring() {
   const handleSelectMarker = (marker) => {
     const zoneId = getMarkerZoneId(marker);
 
-    // 2D 표시용 비콘 위치
+    // 2D 구조도에 표시된 실제 비콘 위치
     const beaconPosition = getMarkerPosition(marker);
 
-    // Unity 이동용 구역 위치
+    // 비콘과 연결된 구역은 이름, 구역 종류 표시용으로만 사용
     const zoneElement = findZoneElementByMarker(marker);
 
     console.log("[Monitoring] 선택 비콘 =", marker);
     console.log("[Monitoring] 연결 구역 ID =", zoneId);
     console.log("[Monitoring] 연결 구역 =", zoneElement);
-    console.log("[Monitoring] 표시 좌표 =", beaconPosition);
-
-    const targetX = zoneElement?.x ?? marker.x ?? beaconPosition.x;
-    const targetY = zoneElement?.y ?? marker.y ?? beaconPosition.y;
-    const targetWidth = zoneElement?.width ?? marker.width ?? 0;
-    const targetHeight = zoneElement?.height ?? marker.height ?? 0;
+    console.log("[Monitoring] 실제 비콘 좌표 =", beaconPosition);
 
     setSelectedMarker(marker);
 
@@ -683,21 +736,20 @@ export default function Monitoring() {
         type: "SELECT_BEACON_ZONE",
 
         payload: {
-          elementId: marker.zoneElementId || marker.elementId || zoneId,
-          zoneElementId: marker.zoneElementId || marker.elementId,
+          elementId: zoneId,
+          zoneElementId: zoneId,
           beaconElementId: marker.beaconElementId || null,
           beaconId: marker.beaconId,
 
           placementName:
-            zoneElement?.name || marker.placementName || "선택 구역",
+            zoneElement?.name || marker.placementName || "선택 비콘",
 
-          // Unity 이동은 비콘 좌표가 아니라 구역 좌표 기준
-          x: targetX,
-          y: targetY,
-          width: targetWidth,
-          height: targetHeight,
+          // 실제 비콘 위치로 이동
+          x: beaconPosition.x,
+          y: beaconPosition.y,
+          width: 0,
+          height: 0,
 
-          // 참고용: 실제 비콘 위치도 같이 보냄
           beaconX: beaconPosition.x,
           beaconY: beaconPosition.y,
 
@@ -912,13 +964,14 @@ export default function Monitoring() {
                   const top = toPercentY(position.y);
 
                   const markerZoneId = getMarkerZoneId(marker);
-                  const selectedMarkerZoneId = getMarkerZoneId(selectedMarker);
+                  const markerKey = getMarkerKey(marker);
+                  const selectedMarkerKey = getMarkerKey(selectedMarker);
 
-                  const selected = selectedMarkerZoneId === markerZoneId;
+                  const selected = selectedMarkerKey === markerKey;
 
                   return (
                     <button
-                      key={markerZoneId}
+                      key={markerKey}
                       type="button"
                       onClick={() => handleSelectMarker(marker)}
                       className={`absolute flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white text-sm font-bold text-white shadow-lg transition ${
@@ -1071,8 +1124,6 @@ export default function Monitoring() {
 
               <tbody>
                 {visibleStudents.map((student) => {
-                  const state = getStudentDetectState(student);
-
                   return (
                     <tr key={student.studentId}>
                       {/* 학생명 */}
@@ -1083,15 +1134,11 @@ export default function Monitoring() {
                       {/* 상태 */}
                       <td className="border-b px-4 py-3">
                         <span
-                          className={`rounded-full px-2 py-1 text-xs font-semibold ${
-                            state === "DETECTED"
-                              ? "bg-green-100 text-green-700"
-                              : state === "LOST"
-                                ? "bg-red-100 text-red-700"
-                                : "bg-gray-100 text-gray-700"
-                          }`}
+                          className={`rounded-full px-2 py-1 text-xs font-semibold ${getStudentStatusClass(
+                            student,
+                          )}`}
                         >
-                          {state}
+                          {getStudentStatusText(student)}
                         </span>
                       </td>
 

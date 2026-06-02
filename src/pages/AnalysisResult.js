@@ -35,6 +35,9 @@ function AnalysisResult() {
   const [studentEvaluations, setStudentEvaluations] = useState([]);
   const [studentNameMap, setStudentNameMap] = useState({});
 
+  // ✅ 퇴출된 학생 ID만 저장
+  const [kickedStudentIdSet, setKickedStudentIdSet] = useState(new Set());
+
   const fetchEvaluations = useCallback(async () => {
     if (!scenarioId) {
       setError("scenarioId가 없습니다. 라우터 경로를 확인해주세요.");
@@ -111,9 +114,9 @@ function AnalysisResult() {
 
   useEffect(() => {
     if (scenarioId) {
-      runEvaluate();
+      fetchEvaluations();
     }
-  }, [scenarioId, runEvaluate]);
+  }, [scenarioId, fetchEvaluations]);
 
   useEffect(() => {
     const fetchStudentNames = async () => {
@@ -158,17 +161,35 @@ function AnalysisResult() {
         const students = await response.json();
 
         const nextMap = {};
+        const nextKickedStudentIds = new Set();
 
         if (Array.isArray(students)) {
           students.forEach((student) => {
-            if (!student?.studentId) return;
+            const rawStudentId =
+              student?.studentId ?? student?.id ?? student?.student_id;
 
-            nextMap[String(student.studentId)] =
-              student.studentName || "이름 없음";
+            if (!rawStudentId) return;
+
+            const studentId = String(rawStudentId);
+
+            nextMap[studentId] =
+              student.studentName || student.name || "이름 없음";
+
+            // ✅ 백엔드 응답 형식이 조금 달라도 퇴출 여부 판별
+            const isKicked =
+              student.isKicked === true ||
+              student.kicked === true ||
+              String(student.status || "").toUpperCase() === "KICKED" ||
+              String(student.status || "").toUpperCase() === "EXPELLED";
+
+            if (isKicked) {
+              nextKickedStudentIds.add(studentId);
+            }
           });
         }
 
         setStudentNameMap(nextMap);
+        setKickedStudentIdSet(nextKickedStudentIds);
       } catch (err) {
         console.error("[AnalysisResult] 학생 이름 조회 실패", err);
       }
@@ -197,45 +218,55 @@ function AnalysisResult() {
   }, [scenarioEvaluation]);
 
   const parsedStudentEvaluations = useMemo(() => {
-    return studentEvaluations.map((student) => {
-      const scoreJson = safeJsonParse(student.scoreJson, {});
-      const detailsJson = safeJsonParse(student.detailsJson, {});
+    return studentEvaluations
+      .filter((student) => {
+        const rawStudentId =
+          student?.studentId ?? student?.id ?? student?.student_id;
 
-      return {
-        ...student,
-        scoreJson,
-        detailsJson,
-      };
-    });
-  }, [studentEvaluations]);
+        if (!rawStudentId) {
+          return true;
+        }
+
+        const studentId = String(rawStudentId);
+
+        // ✅ 퇴출된 것으로 명확히 확인된 학생만 제외
+        return !kickedStudentIdSet.has(studentId);
+      })
+      .map((student) => {
+        const scoreJson = safeJsonParse(student.scoreJson, {});
+        const detailsJson = safeJsonParse(student.detailsJson, {});
+
+        return {
+          ...student,
+          scoreJson,
+          detailsJson,
+        };
+      });
+  }, [studentEvaluations, kickedStudentIdSet]);
 
   const summaryData = useMemo(() => {
-    const studentCount =
-      scenarioDetailsJson.evaluatedStudentCount ??
-      scenarioScoreJson.studentCount ??
-      parsedStudentEvaluations.length;
+    // ✅ 퇴출 학생 제외 후 남은 학생 수
+    const studentCount = parsedStudentEvaluations.length;
 
+    // ✅ 퇴출 학생 제외 후 총 학생 점수
+    const totalStudentScore = parsedStudentEvaluations.reduce(
+      (sum, student) =>
+        sum + Number(student.scoreTotal ?? student.scoreJson?.total ?? 0),
+      0,
+    );
+
+    // ✅ 퇴출 학생 제외 후 평균 점수
     const averageScore =
-      scenarioEvaluation?.scoreTotalRounded ??
-      scenarioDetailsJson.averageScore ??
-      scenarioScoreJson.average ??
-      scenarioEvaluation?.scoreTotal ??
-      0;
+      studentCount > 0 ? totalStudentScore / studentCount : 0;
 
-    const totalStudentScore =
-      scenarioDetailsJson.totalStudentScore ??
-      scenarioScoreJson.totalStudentScore ??
-      parsedStudentEvaluations.reduce(
-        (sum, student) => sum + Number(student.scoreTotal || 0),
-        0,
-      );
-
+    // ✅ 퇴출 학생 제외 후 안전구역 도착 학생 수
     const safezoneCompletedCount = parsedStudentEvaluations.filter(
       (student) =>
         (student.safeZoneCompleted ??
           student.detailsJson?.safeZoneCompleted) === true,
     ).length;
 
+    // ✅ 퇴출 학생 제외 후 정답 퀴즈 총합
     const totalCorrectQuizCount = parsedStudentEvaluations.reduce(
       (sum, student) =>
         sum +
@@ -254,12 +285,7 @@ function AnalysisResult() {
       safezoneCompletedCount,
       totalCorrectQuizCount,
     };
-  }, [
-    scenarioDetailsJson,
-    scenarioScoreJson,
-    scenarioEvaluation,
-    parsedStudentEvaluations,
-  ]);
+  }, [parsedStudentEvaluations]);
 
   return (
     <div className="bg-[#f7f8fa] min-h-screen">

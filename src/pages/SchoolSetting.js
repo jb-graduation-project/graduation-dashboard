@@ -134,12 +134,42 @@ export default function SchoolSetting() {
   const [planPreviewW, setPlanPreviewW] = useState(0);
 
   const showAxiosError = useCallback((title, errOrRes) => {
-    if (errOrRes?.status) {
+    const response = errOrRes?.response || errOrRes;
+    const data = response?.data || {};
+    const code = data?.code || "";
+
+    switch (code) {
+      case "DUPLICATE_SCHOOL_NAME":
+        alert("이미 존재하는 학교 이름입니다.");
+        return;
+
+      case "INVALID_BEACON_REQUEST":
+        alert(data.message || "비콘 등록 정보를 확인해 주세요.");
+        return;
+
+      case "DUPLICATE_BEACON":
+        alert("이미 등록된 비콘입니다.");
+        return;
+
+      case "BEACON_IN_USE":
+        alert(
+          "훈련 이력 또는 미션에서 사용 중인 비콘입니다. 삭제할 수 없습니다.",
+        );
+        return;
+
+      case "INVALID_JSON_REQUEST":
+        alert("요청 JSON 형식 또는 인코딩을 확인해 주세요.");
+        return;
+
+      default:
+        break;
+    }
+
+    if (response?.status) {
       alert(
-        `${title} (${errOrRes.status})\n\n${
-          typeof errOrRes.data === "string"
-            ? errOrRes.data
-            : JSON.stringify(errOrRes.data, null, 2)
+        `${title} (${response.status})\n\n${
+          data?.message ||
+          (typeof data === "string" ? data : JSON.stringify(data, null, 2))
         }`,
       );
       return;
@@ -795,7 +825,10 @@ export default function SchoolSetting() {
       console.log("payload.y =", payload.y);
 
       const res = await axios.post(`${API_BASE}/api/beacons`, payload, {
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: {
+          "Content-Type": "application/json; charset=UTF-8",
+          ...authHeaders,
+        },
         timeout: 10000,
         validateStatus: () => true,
       });
@@ -822,7 +855,10 @@ export default function SchoolSetting() {
         `${API_BASE}/api/beacons/${beaconId}`,
         payload,
         {
-          headers: { "Content-Type": "application/json", ...authHeaders },
+          headers: {
+            "Content-Type": "application/json; charset=UTF-8",
+            ...authHeaders,
+          },
           timeout: 10000,
           validateStatus: () => true,
         },
@@ -921,7 +957,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/rooms/${classroomId}/beacon-mappings/sync`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 10000,
             validateStatus: () => true,
           },
@@ -934,7 +973,18 @@ export default function SchoolSetting() {
           return null;
         }
 
-        return res.data || null;
+        const syncResult = res.data || null;
+
+        if (Number(syncResult?.syncUnmatchedBeacons || 0) > 0) {
+          console.warn(
+            `[비콘 매핑] 구역 내부에 포함되지 않은 비콘이 ${
+              syncResult.syncUnmatchedBeacons
+            }개 있습니다.`,
+            syncResult,
+          );
+        }
+
+        return syncResult;
       } catch (err) {
         console.error("비콘 매핑 동기화 중 오류 =", err);
         showAxiosError("비콘 매핑 동기화 중 오류", err);
@@ -1032,43 +1082,26 @@ export default function SchoolSetting() {
 
       if (!zoneElements.length) return null;
 
-      // 1순위: 비콘 좌표가 구역 내부에 있는 경우
+      // ✅ 변경된 백엔드 기준과 동일하게:
+      // 비콘 좌표가 구역 내부에 있을 때만 자동 연결
       const containingZone = zoneElements.find((zone) => {
         const x = Number(zone.x || 0);
         const y = Number(zone.y || 0);
         const width = Number(zone.width || 0);
         const height = Number(zone.height || 0);
 
+        const beaconX = Number(beacon.x || 0);
+        const beaconY = Number(beacon.y || 0);
+
         return (
-          beacon.x >= x &&
-          beacon.x <= x + width &&
-          beacon.y >= y &&
-          beacon.y <= y + height
+          beaconX >= x &&
+          beaconX <= x + width &&
+          beaconY >= y &&
+          beaconY <= y + height
         );
       });
 
-      if (containingZone) return containingZone;
-
-      // 2순위: 가장 가까운 구역
-      const beaconX = Number(beacon.x || 0);
-      const beaconY = Number(beacon.y || 0);
-
-      let nearestZone = null;
-      let nearestDistance = Infinity;
-
-      zoneElements.forEach((zone) => {
-        const centerX = Number(zone.x || 0) + Number(zone.width || 0) / 2;
-        const centerY = Number(zone.y || 0) + Number(zone.height || 0) / 2;
-
-        const distance = Math.hypot(beaconX - centerX, beaconY - centerY);
-
-        if (distance < nearestDistance) {
-          nearestDistance = distance;
-          nearestZone = zone;
-        }
-      });
-
-      return nearestZone;
+      return containingZone || null;
     },
     [floors],
   );
@@ -1098,7 +1131,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/beacon-element-maps`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 10000,
             validateStatus: () => true,
           },
@@ -1113,16 +1149,17 @@ export default function SchoolSetting() {
 
         await fetchBeaconElementMaps();
 
-        const targetMapVersionId =
-          activeMapVersionId || localStorage.getItem("activeMapVersionId");
+        // ✅ 서버에서 확인된 활성 구조도가 있을 때만 sync 실행
+        if (activeMapVersionId) {
+          await syncBeaconMappings(activeMapVersionId, "auto-beacon-map-sync");
 
-        if (targetMapVersionId) {
-          await syncBeaconMappings(targetMapVersionId, "auto-beacon-map-sync");
-          await logMonitoringMapAfterSync(targetMapVersionId);
+          await logMonitoringMapAfterSync(activeMapVersionId);
         } else {
           console.warn(
-            "activeMapVersionId가 없어서 자동 sync를 실행하지 못했습니다.",
+            "비콘은 저장되었지만 활성 구조도가 없어 매핑 sync를 건너뜁니다.",
           );
+
+          alert("비콘은 저장되었습니다.\n");
         }
 
         return res.data || null;
@@ -1158,6 +1195,18 @@ export default function SchoolSetting() {
     if (!pendingBeaconNat) return alert("위치를 먼저 선택하세요.");
 
     const uuid = (beaconForm.uuid || "").trim();
+
+    const uuidPattern =
+      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+    if (!uuidPattern.test(uuid)) {
+      alert(
+        "UUID 형식이 올바르지 않습니다.\n" +
+          "예: FDA50693-A4E2-4FB1-AFCF-C6EB07647825",
+      );
+
+      return;
+    }
     const majorNum = Number(beaconForm.major);
     const minorNum = Number(beaconForm.minor);
 
@@ -1201,27 +1250,31 @@ export default function SchoolSetting() {
       const updated = await updateBeaconOnServer(serverBeaconId, payload);
       if (!updated) return;
 
-      setElements((prev) =>
-        prev.map((el) => {
-          if (el.id !== editingBeaconId) return el;
-          return {
-            ...el,
-            floor: serverFloorIndex,
-            beaconUuid: uuid,
-            beaconMajor: majorNum,
-            beaconMinor: minorNum,
-            serverBeaconId,
-            x: pendingBeaconNat.x,
-            y: pendingBeaconNat.y,
-            width: el.width || BEACON_SIZE,
-            height: el.height || BEACON_SIZE,
-          };
-        }),
-      );
+      const updatedElements = elements.map((el) => {
+        if (el.id !== editingBeaconId) return el;
+
+        return {
+          ...el,
+          floor: serverFloorIndex,
+          beaconUuid: uuid,
+          beaconMajor: majorNum,
+          beaconMinor: minorNum,
+          serverBeaconId,
+          x: pendingBeaconNat.x,
+          y: pendingBeaconNat.y,
+          width: el.width || BEACON_SIZE,
+          height: el.height || BEACON_SIZE,
+        };
+      });
+
+      setElements(updatedElements);
+
       const mapId = floors[floorIdx]?.mapId;
+
       if (mapId) {
-        await updateMapToServer(mapId, floorIdx);
+        await updateMapToServer(mapId, floorIdx, updatedElements);
       }
+
       await fetchBeacons();
 
       setIsBeaconModalOpen(false);
@@ -1281,7 +1334,7 @@ export default function SchoolSetting() {
 
     await fetchBeacons();
 
-    // ✅ 비콘 추가 후 자동으로 구역 연결
+    // ✅ 비콘이 실제 zone 내부에 있는 경우에만 자동 연결
     const autoZone = findAutoZoneForBeacon(newBeacon, floorIdx);
 
     if (autoZone) {
@@ -1291,9 +1344,13 @@ export default function SchoolSetting() {
         floorIndex: serverFloorIndex,
       });
 
-      console.log("자동 연결된 구역 =", autoZone);
+      console.log("✅ 비콘이 zone 내부에 있어 자동 연결되었습니다.", autoZone);
     } else {
-      console.warn("자동 연결할 재난/안전/제한 구역을 찾지 못했습니다.");
+      console.warn(
+        "비콘이 재난·안전·제한 구역 내부에 있지 않아 자동 연결하지 않았습니다.",
+      );
+
+      alert("비콘은 등록되었습니다.\n");
     }
 
     setIsBeaconModalOpen(false);
@@ -1325,29 +1382,37 @@ export default function SchoolSetting() {
     return floorNames[currentFloorIndex] || `${currentFloorIndex + 1}층`;
   }, [currentFloorIndex, floorNames]);
 
-  const buildFloorsPayload = useCallback(() => {
-    return floors.map((f, idx) => {
-      const serverFloorIndex = getServerFloorIndex(f, idx);
+  const buildFloorsPayload = useCallback(
+    (overrideFloorIdx = null, overrideElements = null) => {
+      return floors.map((f, idx) => {
+        const serverFloorIndex = getServerFloorIndex(f, idx);
 
-      const floorLabel =
-        floorNames[idx] || f.floorLabel || `${serverFloorIndex}층`;
+        const floorLabel =
+          floorNames[idx] || f.floorLabel || `${serverFloorIndex}층`;
 
-      return {
-        floorIndex: serverFloorIndex,
-        floor: serverFloorIndex,
-        index: serverFloorIndex,
-        floorLabel,
-        name: floorLabel,
-        image: {
-          src: f.imageSrc || null,
-          natural: f.imgNatural || { w: 0, h: 0 },
-        },
-        elements: (f.elements || []).map((el) =>
-          normalizeElementForSave(el, serverFloorIndex),
-        ),
-      };
-    });
-  }, [floors, floorNames]);
+        const sourceElements =
+          idx === overrideFloorIdx && Array.isArray(overrideElements)
+            ? overrideElements
+            : f.elements || [];
+
+        return {
+          floorIndex: serverFloorIndex,
+          floor: serverFloorIndex,
+          index: serverFloorIndex,
+          floorLabel,
+          name: floorLabel,
+          image: {
+            src: f.imageSrc || null,
+            natural: f.imgNatural || { w: 0, h: 0 },
+          },
+          elements: sourceElements.map((el) =>
+            normalizeElementForSave(el, serverFloorIndex),
+          ),
+        };
+      });
+    },
+    [floors, floorNames],
+  );
 
   const fetchActiveMap = useCallback(async () => {
     if (!classroomId) return;
@@ -1364,7 +1429,16 @@ export default function SchoolSetting() {
       }
 
       const data = res.data || {};
-      setActiveMapVersionId(data.mapVersionId || null);
+      const nextActiveMapVersionId = data.mapVersionId || null;
+
+      setActiveMapVersionId(nextActiveMapVersionId);
+
+      if (nextActiveMapVersionId) {
+        localStorage.setItem("activeMapVersionId", nextActiveMapVersionId);
+      } else {
+        // ✅ 서버에 활성 구조도가 없으면 오래된 로컬 값 제거
+        localStorage.removeItem("activeMapVersionId");
+      }
 
       console.log("🔥 active map 전체 응답 =", data);
       console.log("🔥 active map mapVersionId =", data.mapVersionId);
@@ -1620,7 +1694,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/channels/${schoolId}/maps/${mapId}`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 30000,
             validateStatus: () => true,
           },
@@ -1703,7 +1780,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/channels/${schoolId}/maps/${mapId}/analysis/apply`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 30000,
             validateStatus: () => true,
           },
@@ -1816,7 +1896,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/channels/${schoolId}/maps/${mapId}/elements/${elementId}`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 30000,
             validateStatus: () => true,
           },
@@ -1868,7 +1951,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/rooms/${classroomId}/map-versions/from-channel`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 30000,
             validateStatus: () => true,
           },
@@ -1921,7 +2007,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/rooms/${classroomId}/map-versions/from-template`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 30000,
             validateStatus: () => true,
           },
@@ -1968,7 +2057,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/rooms/${classroomId}/map-versions/${mapVersionId}/save-as-template`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 30000,
             validateStatus: () => true,
           },
@@ -2114,7 +2206,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/schools/${schoolId}/map-templates/${templateId}`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 30000,
             validateStatus: () => true,
           },
@@ -2231,7 +2326,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/rooms/${classroomId}/map-versions/from-channel-set`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 30000,
             validateStatus: () => true,
           },
@@ -2287,7 +2385,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/scenarios/${scenarioId}/simulate-beacon-detect`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 30000,
             validateStatus: () => true,
           },
@@ -2415,7 +2516,10 @@ export default function SchoolSetting() {
         `${API_BASE}/api/beacon-element-maps`,
         payload,
         {
-          headers: { "Content-Type": "application/json", ...authHeaders },
+          headers: {
+            "Content-Type": "application/json; charset=UTF-8",
+            ...authHeaders,
+          },
           timeout: 10000,
           validateStatus: () => true,
         },
@@ -2435,15 +2539,20 @@ export default function SchoolSetting() {
 
       await fetchBeaconElementMaps();
 
-      const targetMapVersionId =
-        activeMapVersionId || localStorage.getItem("activeMapVersionId");
+      // ✅ 서버에서 확인된 활성 구조도가 있을 때만 sync 실행
+      if (activeMapVersionId) {
+        await syncBeaconMappings(activeMapVersionId, "beacon-map-sync");
 
-      if (targetMapVersionId) {
-        await syncBeaconMappings(targetMapVersionId, "beacon-map-sync");
-        await logMonitoringMapAfterSync(targetMapVersionId);
+        await logMonitoringMapAfterSync(activeMapVersionId);
       } else {
         console.warn(
-          "activeMapVersionId가 없어서 beacon sync를 실행하지 못했습니다.",
+          "비콘 매핑은 저장되었지만 활성 구조도가 없어 sync를 건너뜁니다.",
+        );
+
+        alert(
+          "비콘과 구조도 요소의 연결은 저장되었습니다.\n" +
+            "활성 구조도가 없어 매핑 동기화는 건너뜁니다.\n" +
+            "구조도를 저장한 뒤 활성 맵 적용을 눌러 주세요.",
         );
       }
     } catch (err) {
@@ -2503,7 +2612,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/rooms/${classroomId}/active-map`,
           { mapVersionId },
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 10000,
             validateStatus: () => true,
           },
@@ -2596,7 +2708,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/rooms/${classroomId}/map-versions/${mapVersionId}`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 10000,
             validateStatus: () => true,
           },
@@ -2670,7 +2785,10 @@ export default function SchoolSetting() {
         `${API_BASE}/api/rooms/${classroomId}/map-versions`,
         payload,
         {
-          headers: { "Content-Type": "application/json", ...authHeaders },
+          headers: {
+            "Content-Type": "application/json; charset=UTF-8",
+            ...authHeaders,
+          },
           timeout: 10000,
           validateStatus: () => true,
         },
@@ -4161,7 +4279,10 @@ export default function SchoolSetting() {
           `${API_BASE}/api/rooms/${classroomId}/map-versions/${mapVersionId}`,
           payload,
           {
-            headers: { "Content-Type": "application/json", ...authHeaders },
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              ...authHeaders,
+            },
             timeout: 10000,
             validateStatus: () => true,
           },
@@ -5759,7 +5880,7 @@ export default function SchoolSetting() {
                     setBeaconForm((p) => ({ ...p, uuid: e.target.value }))
                   }
                   className="w-full border rounded px-3 py-2"
-                  placeholder="예: 31415926-5358-9793-2384-626433832795"
+                  placeholder="예: FDA50693-A4E2-4FB1-AFCF-C6EB07647825"
                   autoFocus
                 />
               </div>

@@ -105,8 +105,21 @@ function Navbar() {
       }
 
       alert("✅ 방이 삭제되었습니다.");
+
+      // ✅ 삭제된 방과 관련된 저장 정보 제거
       localStorage.removeItem("classroomId");
-      navigate("/room-list");
+      localStorage.removeItem("roomContext");
+      localStorage.removeItem("gameContext");
+      localStorage.removeItem("lastResultContext");
+
+      navigate("/room-list", {
+        replace: true,
+        state: {
+          schoolId,
+          schoolName,
+          schoolCode,
+        },
+      });
     } catch (e) {
       console.error(e);
       alert("서버 오류로 방 삭제에 실패했습니다.");
