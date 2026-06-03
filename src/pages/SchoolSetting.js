@@ -1449,7 +1449,15 @@ export default function SchoolSetting() {
       const parsedFloors = JSON.parse(data.floorsJson);
       if (!Array.isArray(parsedFloors) || parsedFloors.length === 0) return;
 
-      setFloorNames(parsedFloors.map((f, idx) => f?.name || `${idx + 1}층`));
+      setFloorNames(
+        parsedFloors.map((f, idx) => {
+          const serverFloorIndex = Number(
+            f?.floorIndex ?? f?.floor ?? f?.index ?? idx,
+          );
+
+          return f?.floorLabel || f?.name || `${serverFloorIndex + 1}층`;
+        }),
+      );
 
       setFloors(
         parsedFloors.map((f, idx) => {
@@ -1573,12 +1581,12 @@ export default function SchoolSetting() {
           const keepNatural =
             prevFloor?.imageSrc === nextImageSrc ? prevFloor.imgNatural : null;
 
-          const serverFloorIndex = Number(m.floorIndex ?? idx + 1);
+          const serverFloorIndex = Number(m.floorIndex ?? idx);
 
           return {
             mapId: m.mapId,
             floorIndex: serverFloorIndex,
-            floorLabel: m.floorLabel || `${serverFloorIndex}층`,
+            floorLabel: m.floorLabel || `${serverFloorIndex + 1}층`,
             imageSrc: nextImageSrc,
             uploadedFile: null,
             imgNatural: keepNatural || { w: 0, h: 0 },
@@ -4346,21 +4354,40 @@ export default function SchoolSetting() {
         setActiveMapVersionId(data.mapVersionId || null);
         setFloorNames(parsedFloors.map((f, idx) => f?.name || `${idx + 1}층`));
         setFloors(
-          parsedFloors.map((f, idx) => ({
-            imageSrc:
-              toPublicImg(f?.image?.src) || toPublicImg(thumbnailImage) || null,
-            uploadedFile: null,
-            imgNatural: f?.image?.natural || { w: 0, h: 0 },
-            elements: Array.isArray(f?.elements)
-              ? f.elements.map((el) => ({ ...el, floor: idx }))
-              : [],
-            undoStack: [],
-            redoStack: [],
-            hasAutoAnalysisResult: false,
-            autoElementsCache: [],
-            autoAnalysisHidden: false,
-            abort: { analyze: null },
-          })),
+          parsedFloors.map((f, idx) => {
+            const serverFloorIndex = Number(
+              f?.floorIndex ?? f?.floor ?? f?.index ?? idx,
+            );
+
+            return {
+              floorIndex: serverFloorIndex,
+              floorLabel:
+                f?.floorLabel || f?.name || `${serverFloorIndex + 1}층`,
+              imageSrc:
+                toPublicImg(f?.image?.src) ||
+                toPublicImg(thumbnailImage) ||
+                null,
+              uploadedFile: null,
+              imgNatural: f?.image?.natural || { w: 0, h: 0 },
+              elements: Array.isArray(f?.elements)
+                ? f.elements.map((el) => ({
+                    ...el,
+                    floorIndex: Number(
+                      el?.floorIndex ?? el?.floor ?? serverFloorIndex,
+                    ),
+                    floor: Number(
+                      el?.floor ?? el?.floorIndex ?? serverFloorIndex,
+                    ),
+                  }))
+                : [],
+              undoStack: [],
+              redoStack: [],
+              hasAutoAnalysisResult: false,
+              autoElementsCache: [],
+              autoAnalysisHidden: false,
+              abort: { analyze: null },
+            };
+          }),
         );
 
         setCurrentFloorIndex((prev) =>

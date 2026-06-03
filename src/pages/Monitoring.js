@@ -1007,7 +1007,7 @@ export default function Monitoring() {
                     </p>
 
                     <p className="text-sm text-gray-500">
-                      {selectedMarker.zoneType}
+                      {selectedMarker.zoneType || "일반 비콘"}
                     </p>
 
                     <p className="text-xs text-gray-500">

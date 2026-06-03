@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
 
@@ -37,6 +43,14 @@ function AnalysisResult() {
 
   // ✅ 퇴출된 학생 ID만 저장
   const [kickedStudentIdSet, setKickedStudentIdSet] = useState(new Set());
+
+  // ✅ 학생별 AI 텍스트 피드백
+  const [studentFeedbackMap, setStudentFeedbackMap] = useState({});
+  const [feedbackErrorMap, setFeedbackErrorMap] = useState({});
+  const [generatingFeedback, setGeneratingFeedback] = useState(false);
+
+  // ✅ 동일한 시나리오에서 AI 피드백이 중복 호출되는 것을 방지
+  const autoFeedbackScenarioRef = useRef("");
 
   const fetchEvaluations = useCallback(async () => {
     if (!scenarioId) {
@@ -99,10 +113,16 @@ function AnalysisResult() {
       }
 
       /*
-        evaluate 응답에도 studentEvaluations가 들어오지만,
-        백엔드 정책상 기존 평가 삭제 후 최신 평가 저장이므로
-        evaluate 실행 후 evaluations를 다시 조회해서 화면을 최신 저장 결과 기준으로 맞춘다.
-      */
+  evaluate 응답에도 studentEvaluations가 들어오지만,
+  백엔드 정책상 기존 평가 삭제 후 최신 평가 저장이므로
+  evaluate 실행 후 evaluations를 다시 조회해서 화면을 최신 저장 결과 기준으로 맞춘다.
+*/
+
+      // ✅ 재평가 후 AI 피드백도 다시 생성할 수 있도록 초기화
+      autoFeedbackScenarioRef.current = "";
+      setStudentFeedbackMap({});
+      setFeedbackErrorMap({});
+
       await fetchEvaluations();
     } catch (err) {
       console.error(err);
@@ -209,14 +229,157 @@ function AnalysisResult() {
     );
   };
 
-  const scenarioScoreJson = useMemo(() => {
-    return safeJsonParse(scenarioEvaluation?.scoreJson, {});
-  }, [scenarioEvaluation]);
+  const getStudentKey = (student) => {
+    return String(
+      student?.studentId ??
+        student?.id ??
+        student?.student_id ??
+        student?.evaluationId ??
+        "",
+    );
+  };
 
-  const scenarioDetailsJson = useMemo(() => {
-    return safeJsonParse(scenarioEvaluation?.detailsJson, {});
-  }, [scenarioEvaluation]);
+  const buildFeedbackPayload = (student) => {
+    const details = student?.detailsJson || {};
 
+    const missions = [
+      {
+        title: "랜덤 퀴즈 수행",
+        status: student.randomQuizCompleted === true ? "COMPLETED" : "FAILED",
+      },
+      {
+        title: "119 신고",
+        status: student.reportCallCompleted === true ? "COMPLETED" : "FAILED",
+      },
+      {
+        title: "소화기 찾기",
+        status: student.extinguisherFound === true ? "COMPLETED" : "FAILED",
+      },
+      {
+        title: "안전구역 이동",
+        status: student.safeZoneCompleted === true ? "COMPLETED" : "FAILED",
+      },
+      {
+        title: "소화기 획득",
+        status:
+          student.fireteamExtinguisherAcquired === true
+            ? "COMPLETED"
+            : "FAILED",
+      },
+      {
+        title: "소화기 퀴즈",
+        status:
+          student.fireteamExtinguisherQuizCompleted === true
+            ? "COMPLETED"
+            : "FAILED",
+      },
+      {
+        title: "화재 진압 참여",
+        status:
+          student.fireteamDonutCompleted === true ? "COMPLETED" : "FAILED",
+      },
+    ];
+
+    // ✅ 랜덤 퀴즈는 총 5개
+    const TOTAL_RANDOM_QUIZ_COUNT = 5;
+
+    const correctQuizCount = Math.min(
+      Math.max(
+        Number(student.correctQuizCount ?? details.correctQuizCount ?? 0),
+        0,
+      ),
+      TOTAL_RANDOM_QUIZ_COUNT,
+    );
+
+    // ✅ 정답 개수만큼 true, 나머지는 false로 생성
+    const quizzes = Array.from(
+      { length: TOTAL_RANDOM_QUIZ_COUNT },
+      (_, index) => ({
+        isCorrect: index < correctQuizCount,
+      }),
+    );
+
+    return {
+      studentName: getStudentName(student),
+      missions,
+      quizzes,
+
+      // ✅ 기존 call119가 아니라 실제 응답 필드 사용
+      call119:
+        student.reportCallCompleted === true ||
+        details.reportCallCompleted === true,
+    };
+  };
+  const generateStudentFeedbacks = async () => {
+    if (parsedStudentEvaluations.length === 0) {
+      setError("AI 피드백을 생성할 학생 평가 결과가 없습니다.");
+      return;
+    }
+
+    setGeneratingFeedback(true);
+    setError("");
+    setFeedbackErrorMap({});
+
+    const nextFeedbackMap = {};
+    const nextErrorMap = {};
+
+    await Promise.allSettled(
+      parsedStudentEvaluations.map(async (student) => {
+        const studentKey = getStudentKey(student);
+
+        if (!studentKey) {
+          return;
+        }
+
+        try {
+          const payload = buildFeedbackPayload(student);
+
+          const response = await fetch(`${API_BASE_URL}/api/ai/feedback`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              accept: "application/json",
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            let errorData = {};
+
+            try {
+              errorData = await response.json();
+            } catch {
+              errorData = {};
+            }
+
+            throw new Error(
+              errorData.message || `AI 피드백 생성 실패: ${response.status}`,
+            );
+          }
+
+          const data = await response.json();
+
+          nextFeedbackMap[studentKey] =
+            data.result || "AI 피드백 결과가 없습니다.";
+        } catch (err) {
+          console.error("[AnalysisResult] AI 피드백 생성 실패", err);
+
+          nextErrorMap[studentKey] =
+            err.message || "AI 피드백 생성에 실패했습니다.";
+        }
+      }),
+    );
+
+    setStudentFeedbackMap((prev) => ({
+      ...prev,
+      ...nextFeedbackMap,
+    }));
+
+    setFeedbackErrorMap(nextErrorMap);
+    setGeneratingFeedback(false);
+  };
+
+  // ✅ 평가 결과를 화면 표시용 형태로 변환
   const parsedStudentEvaluations = useMemo(() => {
     return studentEvaluations
       .filter((student) => {
@@ -243,6 +406,38 @@ function AnalysisResult() {
         };
       });
   }, [studentEvaluations, kickedStudentIdSet]);
+
+  // ✅ 시나리오가 변경되면 이전 AI 피드백 초기화
+  useEffect(() => {
+    autoFeedbackScenarioRef.current = "";
+    setStudentFeedbackMap({});
+    setFeedbackErrorMap({});
+  }, [scenarioId]);
+
+  // ✅ 평가 데이터 로딩 직후 학생별 AI 피드백 자동 생성
+  useEffect(() => {
+    if (!scenarioId) {
+      return;
+    }
+
+    if (parsedStudentEvaluations.length === 0) {
+      return;
+    }
+
+    if (generatingFeedback) {
+      return;
+    }
+
+    if (autoFeedbackScenarioRef.current === scenarioId) {
+      return;
+    }
+
+    autoFeedbackScenarioRef.current = scenarioId;
+    generateStudentFeedbacks();
+
+    // generateStudentFeedbacks는 현재 평가 결과를 기준으로 한 번만 실행
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenarioId, parsedStudentEvaluations.length]);
 
   const summaryData = useMemo(() => {
     // ✅ 퇴출 학생 제외 후 남은 학생 수
@@ -297,18 +492,20 @@ function AnalysisResult() {
             <h2 className="text-3xl font-bold text-[#2E7D32]">분석 결과</h2>
           </div>
 
-          <button
-            type="button"
-            onClick={runEvaluate}
-            disabled={evaluating || loading}
-            className={`px-5 py-2 rounded-lg text-white font-semibold shadow ${
-              evaluating || loading
-                ? "bg-gray-400 cursor-not-allowed"
-                : "bg-[#2E7D32] hover:bg-[#256428]"
-            }`}
-          >
-            {evaluating ? "평가 계산 중..." : "평가 다시 계산"}
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={runEvaluate}
+              disabled={evaluating || loading || generatingFeedback}
+              className={`px-5 py-2 rounded-lg text-white font-semibold shadow ${
+                evaluating || loading || generatingFeedback
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-[#2E7D32] hover:bg-[#256428]"
+              }`}
+            >
+              {evaluating ? "평가 계산 중..." : "평가 다시 계산"}
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -317,9 +514,11 @@ function AnalysisResult() {
           </div>
         )}
 
-        {(loading || evaluating) && (
+        {(loading || evaluating || generatingFeedback) && (
           <div className="bg-white border border-gray-200 px-4 py-3 rounded-lg text-gray-600">
-            평가 데이터를 불러오는 중입니다.
+            {generatingFeedback
+              ? "학생별 AI 피드백을 생성하는 중입니다."
+              : "평가 데이터를 불러오는 중입니다."}
           </div>
         )}
 
@@ -472,6 +671,12 @@ function AnalysisResult() {
                       student.safeZoneCompleted ??
                       student.detailsJson?.safeZoneCompleted;
 
+                    const studentKey = getStudentKey(student);
+
+                    const generatedFeedback = studentFeedbackMap[studentKey];
+
+                    const feedbackError = feedbackErrorMap[studentKey];
+
                     return (
                       <tr
                         key={student.evaluationId || student.studentId}
@@ -521,8 +726,16 @@ function AnalysisResult() {
                           )}
                         </td>
 
-                        <td className="px-4 py-3 border text-gray-600 min-w-[280px]">
-                          {student.feedbackText || "-"}
+                        <td className="px-4 py-3 border text-gray-600 min-w-[320px] whitespace-pre-line">
+                          {feedbackError ? (
+                            <span className="text-red-600">
+                              {feedbackError}
+                            </span>
+                          ) : generatedFeedback ? (
+                            generatedFeedback
+                          ) : (
+                            student.feedbackText || "-"
+                          )}
                         </td>
                       </tr>
                     );
@@ -530,31 +743,6 @@ function AnalysisResult() {
                 )}
               </tbody>
             </table>
-          </div>
-        </div>
-
-        {/* 시나리오 평가 상세 */}
-        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-          <h3 className="text-xl font-bold text-[#2E7D32] mb-3">
-            시나리오 평가 요약
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div className="border rounded-lg p-4">
-              <p className="font-semibold text-gray-500 mb-1">평가 피드백</p>
-              <p className="text-gray-800">
-                {scenarioEvaluation?.feedbackText || "-"}
-              </p>
-            </div>
-
-            <div className="border rounded-lg p-4">
-              <p className="font-semibold text-gray-500 mb-1">평가 생성 시각</p>
-              <p className="text-gray-800">
-                {scenarioEvaluation?.createdAt
-                  ? new Date(scenarioEvaluation.createdAt).toLocaleString()
-                  : "-"}
-              </p>
-            </div>
           </div>
         </div>
       </div>
