@@ -139,44 +139,57 @@ function Navbar() {
   const schoolName = location.state?.schoolName || null;
   const schoolCode = location.state?.schoolCode || null;
 
-  const activeScenarioId = useMemo(() => {
-    try {
-      const gameContext = JSON.parse(
-        localStorage.getItem("gameContext") || "{}",
-      );
+  const getLatestScenarioId = () => {
+    const safeParse = (key) => {
+      try {
+        return JSON.parse(localStorage.getItem(key) || "{}");
+      } catch {
+        return {};
+      }
+    };
 
-      return (
-        gameContext?.scenarioId ||
-        gameContext?.activeScenarioId ||
-        location.state?.scenarioId ||
-        location.state?.activeScenarioId ||
-        null
-      );
-    } catch {
-      return (
-        location.state?.scenarioId || location.state?.activeScenarioId || null
-      );
-    }
-  }, [location.state]);
+    const gameContext = safeParse("gameContext");
+    const lastResultContext = safeParse("lastResultContext");
+    const roomContext = safeParse("roomContext");
 
+    const scenarioId =
+      location.state?.scenarioId ||
+      location.state?.activeScenarioId ||
+      gameContext?.scenarioId ||
+      gameContext?.activeScenarioId ||
+      lastResultContext?.scenarioId ||
+      lastResultContext?.activeScenarioId ||
+      roomContext?.scenarioId ||
+      roomContext?.activeScenarioId ||
+      localStorage.getItem("activeScenarioId") ||
+      localStorage.getItem("scenarioId") ||
+      null;
+
+    console.log("[Navbar] 최신 분석 결과 scenarioId =", scenarioId);
+
+    return scenarioId;
+  };
   const handleNavigate = (item) => {
     if (item.path === "/analysis") {
-      if (!activeScenarioId) {
+      // ✅ 버튼을 누르는 시점에 localStorage의 최신 값을 다시 확인
+      const latestScenarioId = getLatestScenarioId();
+
+      if (!latestScenarioId) {
         alert(
           "조회할 분석 결과가 없습니다.\n훈련을 먼저 시작하고 종료해 주세요.",
         );
         return;
       }
 
-      navigate(`/analysis/${activeScenarioId}`, {
+      navigate(`/analysis/${latestScenarioId}`, {
         state: {
           ...location.state,
           classroomId,
           schoolId,
           schoolName,
           schoolCode,
-          scenarioId: activeScenarioId,
-          activeScenarioId,
+          scenarioId: latestScenarioId,
+          activeScenarioId: latestScenarioId,
           thumbnailImage: location.state?.thumbnailImage || null,
         },
       });

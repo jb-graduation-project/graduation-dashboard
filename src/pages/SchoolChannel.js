@@ -746,12 +746,16 @@ function SchoolChannel() {
         "lastResultContext",
         JSON.stringify({
           scenarioId: resultScenarioId,
+          activeScenarioId: resultScenarioId,
           classroomId,
           joinCode,
           roomName: className,
           studentCount,
         }),
       );
+
+      // ✅ Navbar가 언제든지 최근 scenarioId를 찾을 수 있도록 별도 저장
+      localStorage.setItem("activeScenarioId", String(resultScenarioId));
 
       setResultScenarioId(resultScenarioId);
 
