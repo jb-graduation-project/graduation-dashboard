@@ -1159,7 +1159,7 @@ export default function SchoolSetting() {
             "비콘은 저장되었지만 활성 구조도가 없어 매핑 sync를 건너뜁니다.",
           );
 
-          alert("비콘은 저장되었습니다.\n");
+          alert("비콘이 저장되었습니다.\n");
         }
 
         return res.data || null;
@@ -4688,6 +4688,10 @@ export default function SchoolSetting() {
               <button
                 onClick={() => {
                   if (!imageSrc) return;
+
+                  // ✅ 상단 저장 버튼은 항상 새 구조도 버전 생성
+                  setSelectedPlanId(null);
+                  setSelectedPlanDetail(null);
                   setSavePlanName("");
                   setIsSavePlanModalOpen(true);
                 }}
@@ -4743,6 +4747,45 @@ export default function SchoolSetting() {
                         {idx + 1}. {item}
                       </div>
                     ))}
+                  </div>
+                </section>
+
+                {/* 구역 색상 안내 */}
+                <section>
+                  <h3 className="text-lg font-bold mb-4 text-gray-800">
+                    🎨 구역 색상 안내
+                  </h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="flex items-center gap-3 border rounded-xl p-4 bg-yellow-50">
+                      <div className="w-6 h-6 rounded bg-yellow-400 border border-yellow-500 shrink-0" />
+                      <div>
+                        <p className="font-bold text-yellow-700">제한 구역</p>
+                        <p className="text-sm text-gray-600">
+                          노란색은 학생의 접근이 제한되는 구역을 의미합니다.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 border rounded-xl p-4 bg-green-50">
+                      <div className="w-6 h-6 rounded bg-green-500 border border-green-600 shrink-0" />
+                      <div>
+                        <p className="font-bold text-green-700">안전 구역</p>
+                        <p className="text-sm text-gray-600">
+                          초록색은 학생이 대피해야 하는 안전 구역을 의미합니다.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 border rounded-xl p-4 bg-red-50">
+                      <div className="w-6 h-6 rounded bg-red-500 border border-red-600 shrink-0" />
+                      <div>
+                        <p className="font-bold text-red-700">재난 구역</p>
+                        <p className="text-sm text-gray-600">
+                          빨간색은 재난이 발생한 위험 구역을 의미합니다.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </section>
 

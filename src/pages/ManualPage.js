@@ -878,100 +878,80 @@ export default function ManualPage() {
               </div>
 
               {/* 소화기 찾기 */}
-              <div className="grid xl:grid-cols-2 gap-12 items-center">
-                <div>
-                  <h3 className="text-3xl font-bold text-[#2E7D32] mb-6">
-                    1단계. 소화기 찾기
-                  </h3>
+              <div>
+                <h3 className="text-3xl font-bold text-[#2E7D32] mb-6">
+                  1단계. 소화기 찾기
+                </h3>
 
-                  <div className="space-y-4 text-lg text-gray-700 leading-relaxed">
-                    <p>
-                      게임이 시작되면 주변을 천천히 둘러보며 소화기를 찾습니다.
-                      실제 교육 환경에서는 벽면, 복도, 출입구 근처처럼 소화기가
-                      설치될 가능성이 높은 위치를 확인하도록 안내합니다.
-                    </p>
+                <div className="space-y-4 text-lg text-gray-700 leading-relaxed">
+                  <p>
+                    게임이 시작되면 주변을 천천히 둘러보며 소화기를 찾습니다.
+                    실제 교육 환경에서는 벽면, 복도, 출입구 근처처럼 소화기가
+                    설치될 가능성이 높은 위치를 확인하도록 안내합니다.
+                  </p>
 
-                    <div>
-                      <strong className="text-[#2E7D32]">사용 방법</strong>
-                      <ul className="list-disc ml-6 mt-2 space-y-2">
-                        <li>스마트폰을 두 손으로 잡습니다.</li>
-                        <li>주변을 빠르게 흔들지 말고 천천히 비춥니다.</li>
-                        <li>
-                          소화기가 화면에 들어오도록 카메라 방향을 맞춥니다.
-                        </li>
-                        <li>
-                          인식 또는 미션 확인이 완료되면 다음 단계로 이동합니다.
-                        </li>
-                      </ul>
-                    </div>
-
-                    <div>
-                      <strong className="text-[#2E7D32]">교육 포인트</strong>
-                      <ul className="list-disc ml-6 mt-2 space-y-2">
-                        <li>소화기는 평소 위치를 알아두는 것이 중요합니다.</li>
-                        <li>
-                          실제 화재 시 소화기를 찾느라 대피가 늦어져서는 안
-                          됩니다.
-                        </li>
-                        <li>작은 초기 화재인지 먼저 판단해야 합니다.</li>
-                      </ul>
-                    </div>
+                  <div>
+                    <strong className="text-[#2E7D32]">사용 방법</strong>
+                    <ul className="list-disc ml-6 mt-2 space-y-2">
+                      <li>스마트폰을 두 손으로 잡습니다.</li>
+                      <li>주변을 빠르게 흔들지 말고 천천히 비춥니다.</li>
+                      <li>
+                        소화기가 화면에 들어오도록 카메라 방향을 맞춥니다.
+                      </li>
+                      <li>
+                        인식 또는 미션 확인이 완료되면 다음 단계로 이동합니다.
+                      </li>
+                    </ul>
                   </div>
-                </div>
 
-                <div className={studentCardStyle}>
-                  <img
-                    src="/img/manual/camera_detect.png"
-                    alt="소화기 탐지"
-                    className={studentImageStyle}
-                  />
+                  <div>
+                    <strong className="text-[#2E7D32]">교육 포인트</strong>
+                    <ul className="list-disc ml-6 mt-2 space-y-2">
+                      <li>소화기는 평소 위치를 알아두는 것이 중요합니다.</li>
+                      <li>
+                        실제 화재 시 소화기를 찾느라 대피가 늦어져서는 안
+                        됩니다.
+                      </li>
+                      <li>작은 초기 화재인지 먼저 판단해야 합니다.</li>
+                    </ul>
+                  </div>
                 </div>
               </div>
 
               {/* 화재 배치 */}
-              <div className="grid xl:grid-cols-2 gap-12 items-center">
-                <div className="order-2 xl:order-1 bg-[#FAFAFA] rounded-2xl border p-4 flex items-center justify-center">
-                  <img
-                    src="/img/manual/fire_place.png"
-                    alt="화재 배치"
-                    className={studentImageStyle}
-                  />
-                </div>
+              <div>
+                <h3 className="text-3xl font-bold text-[#2E7D32] mb-6">
+                  2단계. AR 화재 위치 지정
+                </h3>
 
-                <div className="order-1 xl:order-2">
-                  <h3 className="text-3xl font-bold text-[#2E7D32] mb-6">
-                    2단계. AR 화재 위치 지정
-                  </h3>
+                <div className="space-y-4 text-lg text-gray-700 leading-relaxed">
+                  <p>
+                    소화기 찾기가 완료되면 카메라로 바닥을 비추고, 인식된 바닥
+                    지점을 터치해 가상의 화재를 배치합니다.
+                  </p>
 
-                  <div className="space-y-4 text-lg text-gray-700 leading-relaxed">
-                    <p>
-                      소화기 찾기가 완료되면 카메라로 바닥을 비추고, 인식된 바닥
-                      지점을 터치해 가상의 화재를 배치합니다.
-                    </p>
+                  <div>
+                    <strong className="text-[#2E7D32]">사용 방법</strong>
+                    <ul className="list-disc ml-6 mt-2 space-y-2">
+                      <li>카메라가 바닥을 향하도록 합니다.</li>
+                      <li>
+                        바닥을 천천히 비추며 AR 평면이 잡힐 때까지 기다립니다.
+                      </li>
+                      <li>사람과 장애물이 없는 위치를 선택합니다.</li>
+                      <li>화면의 바닥 지점을 한 번 터치합니다.</li>
+                    </ul>
+                  </div>
 
-                    <div>
-                      <strong className="text-[#2E7D32]">사용 방법</strong>
-                      <ul className="list-disc ml-6 mt-2 space-y-2">
-                        <li>카메라가 바닥을 향하도록 합니다.</li>
-                        <li>
-                          바닥을 천천히 비추며 AR 평면이 잡힐 때까지 기다립니다.
-                        </li>
-                        <li>사람과 장애물이 없는 위치를 선택합니다.</li>
-                        <li>화면의 바닥 지점을 한 번 터치합니다.</li>
-                      </ul>
-                    </div>
-
-                    <div>
-                      <strong className="text-[#2E7D32]">주의 사항</strong>
-                      <ul className="list-disc ml-6 mt-2 space-y-2">
-                        <li>너무 가까운 발밑에 화재를 배치하지 않습니다.</li>
-                        <li>다른 사람의 이동 경로 위에 배치하지 않습니다.</li>
-                        <li>
-                          평면 인식이 안 되면 더 밝거나 무늬가 있는 바닥을
-                          비춥니다.
-                        </li>
-                      </ul>
-                    </div>
+                  <div>
+                    <strong className="text-[#2E7D32]">주의 사항</strong>
+                    <ul className="list-disc ml-6 mt-2 space-y-2">
+                      <li>너무 가까운 발밑에 화재를 배치하지 않습니다.</li>
+                      <li>다른 사람의 이동 경로 위에 배치하지 않습니다.</li>
+                      <li>
+                        평면 인식이 안 되면 더 밝거나 무늬가 있는 바닥을
+                        비춥니다.
+                      </li>
+                    </ul>
                   </div>
                 </div>
               </div>
@@ -1059,47 +1039,37 @@ export default function ManualPage() {
               </div>
 
               {/* 도넛 게이지 */}
-              <div className="grid xl:grid-cols-2 gap-12 items-center">
-                <div>
-                  <h3 className="text-3xl font-bold text-[#2E7D32] mb-6">
-                    5단계. 도넛 게이지 채우기
-                  </h3>
+              <div>
+                <h3 className="text-3xl font-bold text-[#2E7D32] mb-6">
+                  5단계. 도넛 게이지 채우기
+                </h3>
 
-                  <div className="space-y-4 text-lg text-gray-700 leading-relaxed">
-                    <p>
-                      카드 퀴즈를 맞히면 도넛 게이지가 나타납니다. 이 단계는
-                      실제 분사 전 소화기를 사용할 준비를 하는 과정입니다.
-                    </p>
+                <div className="space-y-4 text-lg text-gray-700 leading-relaxed">
+                  <p>
+                    카드 퀴즈를 맞히면 도넛 게이지가 나타납니다. 이 단계는 실제
+                    분사 전 소화기를 사용할 준비를 하는 과정입니다.
+                  </p>
 
-                    <div>
-                      <strong className="text-[#2E7D32]">사용 방법</strong>
-                      <ul className="list-disc ml-6 mt-2 space-y-2">
-                        <li>화면 안내를 확인합니다.</li>
-                        <li>화면을 연속으로 터치하거나 길게 누릅니다.</li>
-                        <li>게이지가 줄어들지 않도록 입력을 유지합니다.</li>
-                        <li>게이지가 가득 차면 실제 분사 단계로 넘어갑니다.</li>
-                      </ul>
-                    </div>
-
-                    <div>
-                      <strong className="text-[#2E7D32]">조작 팁</strong>
-                      <ul className="list-disc ml-6 mt-2 space-y-2">
-                        <li>짧게 여러 번 터치하면 빠르게 채울 수 있습니다.</li>
-                        <li>길게 눌러도 게이지가 올라갑니다.</li>
-                        <li>
-                          일정 시간 입력하지 않으면 게이지가 감소할 수 있습니다.
-                        </li>
-                      </ul>
-                    </div>
+                  <div>
+                    <strong className="text-[#2E7D32]">사용 방법</strong>
+                    <ul className="list-disc ml-6 mt-2 space-y-2">
+                      <li>화면 안내를 확인합니다.</li>
+                      <li>화면을 연속으로 터치하거나 길게 누릅니다.</li>
+                      <li>게이지가 줄어들지 않도록 입력을 유지합니다.</li>
+                      <li>게이지가 가득 차면 실제 분사 단계로 넘어갑니다.</li>
+                    </ul>
                   </div>
-                </div>
 
-                <div className={studentCardStyle}>
-                  <img
-                    src="/img/manual/donut_gauge.png"
-                    alt="도넛 게이지"
-                    className={studentImageStyle}
-                  />
+                  <div>
+                    <strong className="text-[#2E7D32]">조작 팁</strong>
+                    <ul className="list-disc ml-6 mt-2 space-y-2">
+                      <li>짧게 여러 번 터치하면 빠르게 채울 수 있습니다.</li>
+                      <li>길게 눌러도 게이지가 올라갑니다.</li>
+                      <li>
+                        일정 시간 입력하지 않으면 게이지가 감소할 수 있습니다.
+                      </li>
+                    </ul>
+                  </div>
                 </div>
               </div>
 
@@ -1151,15 +1121,7 @@ export default function ManualPage() {
               </div>
 
               {/* 화재 진압 */}
-              <div className="grid xl:grid-cols-2 gap-12 items-center">
-                <div className={studentCardStyle}>
-                  <img
-                    src="/img/manual/fire_extinguish.png"
-                    alt="화재 진압"
-                    className={studentImageStyle}
-                  />
-                </div>
-
+              <div>
                 <div>
                   <h3 className="text-3xl font-bold text-[#2E7D32] mb-6">
                     6단계. PASS 원칙에 따른 소화 실습
@@ -1209,16 +1171,8 @@ export default function ManualPage() {
               </div>
 
               {/* 완료 */}
-              <div className="grid xl:grid-cols-2 gap-12 items-center">
-                <div className="order-2 xl:order-1 bg-[#FAFAFA] rounded-2xl border p-4 flex items-center justify-center">
-                  <img
-                    src="/img/manual/fire_complete.png"
-                    alt="소화 완료"
-                    className={studentImageStyle}
-                  />
-                </div>
-
-                <div className="order-1 xl:order-2">
+              <div>
+                <div>
                   <h3 className="text-3xl font-bold text-[#2E7D32] mb-6">
                     7단계. 소화 완료
                   </h3>

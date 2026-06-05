@@ -473,6 +473,26 @@ export default function Monitoring() {
     ? selectedFloor.beaconMarkers.filter((marker) => marker.isActive !== false)
     : [];
 
+  // ✅ monitoring-map이 갱신되면 선택 중인 비콘 상세 정보도 최신 값으로 교체
+  useEffect(() => {
+    setSelectedMarker((prev) => {
+      if (!prev) return null;
+
+      const getKey = (marker) =>
+        marker?.beaconId ||
+        marker?.beaconElementId ||
+        marker?.zoneElementId ||
+        marker?.elementId ||
+        "";
+
+      const latestMarker = (selectedFloor?.beaconMarkers || [])
+        .filter((marker) => marker.isActive !== false)
+        .find((marker) => getKey(marker) === getKey(prev));
+
+      return latestMarker || null;
+    });
+  }, [selectedFloor]);
+
   // 구조도에 저장된 실제 비콘 설치 위치
   const beaconElements = (selectedFloor?.elements || []).filter((el) => {
     const type = String(el.elementType || el.type || "").toUpperCase();

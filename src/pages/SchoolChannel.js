@@ -630,15 +630,8 @@ function SchoolChannel() {
 
     const scenarioId = stored?.scenarioId || stored?.activeScenarioId || null;
 
-    const startedAt = getIsoNow();
-
-    // ✅ payload는 반드시 이 아래에 있어야 함
     const payload = {
-      classroomId: String(classroomId),
-      trainingState: "RUNNING",
-      trainingStartedAt: startedAt,
-      trainingEndedAt: null,
-      scenarioId: scenarioId,
+      scenarioId,
     };
 
     try {
@@ -665,7 +658,7 @@ function SchoolChannel() {
         classroomId: stored?.classroomId || String(classroomId),
         scenarioId: res.data?.scenarioId || stored?.scenarioId || scenarioId,
         trainingState: res.data?.trainingState || "RUNNING",
-        trainingStartedAt: res.data?.trainingStartedAt || startedAt,
+        trainingStartedAt: res.data?.trainingStartedAt || null,
         trainingEndedAt: res.data?.trainingEndedAt || null,
         activeScenarioId: res.data?.activeScenarioId || scenarioId,
       };
@@ -810,11 +803,18 @@ function SchoolChannel() {
       const started = await handleTrainingStart(validation.context);
       if (!started) return;
 
+      // ✅ 새 훈련 시작 직후 기존 화면 목록 제거
+      setStudents([]);
+      setStudentCount(0);
+
       // 5. 최신 게임 컨텍스트 다시 조회
       const context = await fetchGameStartContext();
       if (!context) return;
 
-      alert("학생 역할 배정 후 훈련이 시작되었습니다.");
+      // ✅ 현재 훈련 참가 학생 목록 다시 조회
+      await fetchStudents();
+
+      alert("훈련이 시작되었습니다.");
     } catch (err) {
       showError("게임 시작 실패", err);
     } finally {
