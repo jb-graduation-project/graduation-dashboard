@@ -94,7 +94,7 @@ function ScenarioManagement() {
   const [saving, setSaving] = useState(false);
 
   // 드롭다운 옵션
-  const fireLocations = ["1층", "2층", "3층", "4층"];
+  const fireLocations = Array.from({ length: 10 }, (_, i) => `${i + 1}층`);
   const npcPositions = ["입구", "복도", "계단", "출구"];
   const npcStatuses = ["정상", "이상", "대기"];
 

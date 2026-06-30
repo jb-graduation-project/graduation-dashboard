@@ -3529,14 +3529,37 @@ export default function SchoolSetting() {
 
   // ====== Dragging elements ======
   const [dragging, setDragging] = useState(null);
+
   const startElementsDrag = useCallback(
     (ids, startNat) => {
       if (!ids?.length) return;
-      const origPositions = {};
-      elements.forEach((p) => {
-        if (ids.includes(p.id)) origPositions[p.id] = { x: p.x, y: p.y };
+
+      // ✅ 비콘은 드래그 이동 대상에서 제외
+      const draggableIds = ids.filter((id) => {
+        const el = elements.find((p) => p.id === id);
+        return el && el.type !== "비콘";
       });
-      setDragging({ type: "elements", startNat, ids: [...ids], origPositions });
+
+      // ✅ 선택한 게 비콘뿐이면 dragging 자체를 시작하지 않음
+      if (!draggableIds.length) {
+        setDragging(null);
+        return;
+      }
+
+      const origPositions = {};
+
+      elements.forEach((p) => {
+        if (draggableIds.includes(p.id)) {
+          origPositions[p.id] = { x: p.x, y: p.y };
+        }
+      });
+
+      setDragging({
+        type: "elements",
+        startNat,
+        ids: [...draggableIds],
+        origPositions,
+      });
     },
     [elements],
   );
@@ -3817,19 +3840,37 @@ export default function SchoolSetting() {
             const orig = dragging.origPositions[p.id];
             if (!orig) return p;
 
-            if (p.type === "문" || p.type === "비콘") {
-              const nx = clamp(orig.x + dx, 0, imgNatural.w);
-              const ny = clamp(orig.y + dy, 0, imgNatural.h);
-              return { ...p, x: nx, y: ny };
+            // ✅ 비콘은 혹시 dragging에 들어와도 절대 이동하지 않음
+            if (p.type === "비콘") {
+              return p;
             }
 
+            // ✅ 문은 기존처럼 점 좌표 기준 이동
+            if (p.type === "문") {
+              const nx = clamp(orig.x + dx, 0, imgNatural.w);
+              const ny = clamp(orig.y + dy, 0, imgNatural.h);
+
+              return {
+                ...p,
+                x: round4(nx),
+                y: round4(ny),
+              };
+            }
+
+            // ✅ 방/구역 같은 사각형 요소 이동
             const w = p.width || 0;
             const h = p.height || 0;
             const nx = clamp(orig.x + dx, 0, imgNatural.w - w);
             const ny = clamp(orig.y + dy, 0, imgNatural.h - h);
-            return { ...p, x: nx, y: ny };
+
+            return {
+              ...p,
+              x: round4(nx),
+              y: round4(ny),
+            };
           }),
         );
+
         return;
       }
 
